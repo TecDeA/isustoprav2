@@ -1442,6 +1442,11 @@
     // del modal requieren admin (requireAdmin()).
     if (courseMgmtMenuBtn) courseMgmtMenuBtn.classList.remove('hidden');
 
+    // Aplicar modo solo lectura a la pantalla 4 si el usuario no es admin.
+    // Esto deshabilita checks, textareas y botones para que no parezca que
+    // se puede editar cuando en realidad no se puede guardar.
+    setReadOnlyMode(currentUser.role !== 'admin');
+
     if (currentUser.role === 'admin') {
       userMgmtMenuBtn.classList.remove('hidden');
       // Asegurar que se ven los botones de generación (por si volvemos de un rol user)
@@ -1462,6 +1467,74 @@
       // (un usuario no-admin no debería resetear porque no puede generar PRAs)
       document.querySelectorAll('#footerButtons1 button[onclick="resetApp()"], #footerButtons2 button[onclick="resetApp()"], #footerButtons3 button[onclick="resetApp()"]')
         .forEach(b => b.classList.add('hidden'));
+    }
+  }
+
+  /**
+   * Pone la pantalla 4 (y otros inputs del asistente) en modo solo lectura
+   * cuando isReadOnly=true. Útil para usuarios no-admin, que pueden ver
+   * PRAs guardados pero no generar nuevos.
+   *
+   * Deshabilita:
+   *   - Todos los checkboxes, inputs y textareas del contenedor de pantalla 4.
+   *   - Los radios de perfil (pantalla 2).
+   *   - Los inputs de grupo y tutor (pantalla 1).
+   *   - La drop zone de PDFs (pantalla 1).
+   *
+   * Cuando isReadOnly=false, los rehabilita todos.
+   */
+  function setReadOnlyMode(isReadOnly) {
+    // Pantalla 4: checkboxes y textareas de "Otros aspectos a trabajar"
+    const additionalFieldsContainer = document.getElementById('additional-fields-container');
+    if (additionalFieldsContainer) {
+      additionalFieldsContainer.querySelectorAll('input, textarea, select').forEach(el => {
+        el.disabled = isReadOnly;
+      });
+    }
+    // También los radios de perfil (pantalla 2) y los inputs de grupo/tutor (pantalla 1)
+    document.querySelectorAll('input[name="studentProfile"]').forEach(r => { r.disabled = isReadOnly; });
+    const g = document.getElementById('studentGroup');
+    const t = document.getElementById('studentTutor');
+    if (g) g.disabled = isReadOnly;
+    if (t) t.disabled = isReadOnly;
+    // Drop zone de PDFs (pantalla 1): si está en modo solo lectura, no se
+    // pueden cargar nuevos PDFs. Lo dejamos con un estilo visual de "disabled".
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    if (dropZone) {
+      if (isReadOnly) {
+        dropZone.classList.add('opacity-50', 'pointer-events-none');
+        dropZone.style.cursor = 'not-allowed';
+      } else {
+        dropZone.classList.remove('opacity-50', 'pointer-events-none');
+        dropZone.style.cursor = '';
+      }
+    }
+    if (fileInput) fileInput.disabled = isReadOnly;
+    // Mostrar/ocultar un banner informativo en pantalla 4
+    let banner = document.getElementById('readOnlyBanner');
+    if (isReadOnly) {
+      if (!banner) {
+        const screen4 = document.getElementById('screen4');
+        if (screen4) {
+          banner = document.createElement('div');
+          banner.id = 'readOnlyBanner';
+          banner.className = 'bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-3 mb-4 flex items-center gap-3';
+          banner.innerHTML = `
+            <i class="fa-solid fa-eye text-amber-600 text-lg"></i>
+            <div>
+              <p class="font-semibold text-sm">Modo solo lectura</p>
+              <p class="text-xs text-amber-700">Tu perfil de usuario no permite generar PRAs. Puedes ver los PRAs guardados desde el menú de usuario.</p>
+            </div>
+          `;
+          const firstChild = screen4.querySelector('div');
+          if (firstChild) screen4.insertBefore(banner, firstChild);
+          else screen4.appendChild(banner);
+        }
+      }
+      banner.classList.remove('hidden');
+    } else {
+      if (banner) banner.classList.add('hidden');
     }
   }
 
@@ -2940,7 +3013,16 @@
         renderScreen3();
       } else if (screenNumber === 4) {
         if (getSelectedEvaluationsData().length === 0) { showError("Debes cargar y seleccionar al menos un informe PDF."); goToScreen(1); return; }
-        loadAdditionalFields(); setTimeout(() => { restoreTextAreaState(); setupTextAreaEvents(); }, 100);
+        loadAdditionalFields(); setTimeout(() => {
+          restoreTextAreaState();
+          setupTextAreaEvents();
+          // Reaplicar modo solo lectura si el usuario no es admin
+          // (loadAdditionalFields regenera los checkboxes, así que hay
+          // que deshabilitarlos de nuevo tras el render).
+          if (currentUser && currentUser.role !== 'admin') {
+            setReadOnlyMode(true);
+          }
+        }, 100);
       }
     }
     showBottomNavTemporarily();
