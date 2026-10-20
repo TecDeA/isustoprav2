@@ -1,0 +1,3071 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ISUStoPRA — Extractor y generador PRA</title>
+
+  <!--
+    ============================================================
+    AISLAMIENTO PWA vs PORTAL tecdea.github.io
+    ------------------------------------------------------------
+    Esta PWA está pensada para alojarse en un SUBPATH del portal
+    tecdea.github.io (concretamente https://tecdea.github.io/isustoprav2/).
+
+    Para NO interferir con el portal:
+      • El manifest solo se declara aquí, no en el portal.
+      • El manifest usa scope "./" (relativo), de modo que la
+        PWA instalada solo reclama el subdirectorio, no la raíz.
+      • El SW se registra con scope "./" explícito (ver al final
+        del <body>), de modo que solo controla este subdirectorio.
+      • El manifest tiene "id" propio (relativo) → Chrome la
+        identifica como PWA distinta del portal.
+      • start_url lleva ?source=pwa para distinguir instalaciones
+        de visitas normales en analítica.
+      • El nombre del cache en sw.js lleva prefijo "isustopra-"
+        para no solaparse con caches de otras PWAs del mismo origen.
+    ============================================================
+  -->
+
+  <!-- Manifest (solo esta página; no afecta al portal) -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Favicons: .ico multi-res + PNG modernos + apple-touch -->
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png">
+
+  <!-- Tema PWA -->
+  <meta name="theme-color" content="#2563eb">
+  <meta name="application-name" content="ISUStoPRA">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ISUStoPRA">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="color-scheme" content="light dark">
+
+  <!-- Tailwind, Font Awesome, PDF.js, jsPDF -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <!-- Firebase SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap">
+
+  <style>
+    :root { --header-h: 64px; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans';
+      background:
+        radial-gradient(1000px 600px at 90% -100%, #e0f2fe 0%, transparent 60%),
+        radial-gradient(1200px 800px at -20% 120%, #e9d5ff 0%, transparent 60%),
+        linear-gradient(180deg, #ffffff, #f8fafc);
+    }
+
+    .drop-zone { transition: all 0.25s ease; }
+    .drop-zone.dragover {
+      border-color: #2563eb;
+      background-color: rgba(37, 99, 235, 0.06);
+      transform: translateY(-1px);
+    }
+
+    .loader {
+      border: 4px solid rgba(148,163,184,.25);
+      border-top: 4px solid #2563eb;
+      border-radius: 9999px;
+      width: 30px; height: 30px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .filter-button.active { background-color: #2563eb !important; color: #fff !important; box-shadow: 0 8px 20px rgba(37,99,235,.25); }
+    .evaluation-item.selected { border-color: #2563eb !important; background-color: #eff6ff !important; box-shadow: 0 0 0 2px rgba(37,99,235,.35) inset; }
+    .recovery-criterion-item.selected { background-color: #e0f2fe !important; border-left-color: #1d4ed8 !important; box-shadow: 0 0 0 2px rgba(37,99,235,.35) inset; font-weight: 600; }
+
+    .criterion-node { border: 1px solid; border-radius: 12px; padding: 12px; margin: 8px 0; font-size: .92rem; transition: transform .15s ease, box-shadow .15s ease; }
+    .criterion-node:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(2,8,23,.06); }
+    .criterion-node.cyr { background-color: #ecfdf5; border-color: #34c759; }
+    .criterion-node.tyd { background-color: #eef2ff; border-color: #3b82f6; }
+    .criterion-node.tec4 { background-color: #f5f3ff; border-color: #8b5cf6; }
+
+    .accordion-content { transition: all .25s ease; overflow: hidden; }
+
+    .additional-field-section { padding: 1rem; border-radius: 16px; border: 1px solid #e2e8f0; margin-bottom: 1rem; background: rgba(255,255,255,.65); backdrop-filter: blur(4px); }
+    .additional-field-item { display: flex; gap: .75rem; padding: .5rem; border-radius: .5rem; transition: background-color .15s ease; }
+
+    .section-actividades { background-color: #f0fdf4; border-left: 5px solid #22c55e; }
+    .section-actividades h3 { color: #15803d; }
+    .section-actividades .additional-field-item:hover { background-color: #dcfce7; }
+    .section-acceso { background-color: #fefce8; border-left: 5px solid #eab308; }
+    .section-acceso h3 { color: #a16207; }
+    .section-acceso .additional-field-item:hover { background-color: #fef9c3; }
+    .section-recursos { background-color: #fdf4ff; border-left: 5px solid #c026d3; }
+    .section-recursos h3 { color: #86198f; }
+    .section-recursos .additional-field-item:hover { background-color: #fae8ff; }
+    .section-agrupamientos { background-color: #f8fafc; border-left: 5px solid #64748b; }
+    .section-agrupamientos h3 { color: #475569; }
+    .section-agrupamientos .additional-field-item:hover { background-color: #f1f5f9; }
+    .section-evaluacion { background-color: #fff7ed; border-left: 5px solid #f97316; }
+    .section-evaluacion h3 { color: #c2410c; }
+    .section-evaluacion .additional-field-item:hover { background-color: #ffedd5; }
+
+    .tareas-textarea-container, .otros-textarea-container { margin-left: 1.5rem; margin-top: .5rem; display: none; }
+    .tareas-textarea-container.show, .otros-textarea-container.show { display: block; }
+
+    .cyr-1 { background-color: #ecfdf5; border-left: 4px solid #34c759; }
+    .cyr-2 { background-color: #d1fae5; border-left: 4px solid #2daa4c; }
+    .cyr-3 { background-color: #a7f3d0; border-left: 4px solid #268d3f; }
+    .cyr-4 { background-color: #6ee7b7; border-left: 4px solid #1f7032; }
+    .tyd-1 { background-color: #eef2ff; border-left: 4px solid #3b82f6; }
+    .tyd-2 { background-color: #e0e7ff; border-left: 4px solid #2563eb; }
+    .tyd-3 { background-color: #c7d2fe; border-left: 4px solid #1e40af; }
+    .tyd-4 { background-color: #a5b4fc; border-left: 4px solid #1e3a8a; }
+    .tec4 { background-color: #f5f3ff; border-left: 4px solid #8b5cf6; }
+
+    .accordion-header-cyr { background-color: #f8fafc; }
+    .accordion-content-cyr { background-color: #ecfdf5; }
+    .accordion-header-tyd { background-color: #f8fafc; }
+    .accordion-content-tyd { background-color: #eef2ff; }
+    .accordion-header-tec4 { background-color: #f8fafc; }
+    .accordion-content-tec4 { background-color: #f5f3ff; }
+
+    .bottom-nav {
+      transition: all .25s ease;
+      transform: translateY(100%);
+      opacity: 0;
+      padding-top: .4rem;
+      padding-bottom: .4rem;
+      backdrop-filter: blur(8px);
+    }
+    .bottom-nav.visible, .bottom-nav.always-visible { transform: translateY(0); opacity: 1; }
+    #bottomNav > div { display: flex; align-items: center; min-height: auto; }
+    #bottomNav button { padding-top: .45rem !important; padding-bottom: .45rem !important; }
+
+    @media (max-width: 768px) {
+      .mobile-padding { padding-bottom: 88px; }
+      .mobile-text-sm { font-size: .9rem; }
+      .mobile-p-3 { padding: .75rem; }
+      .mobile-py-2 { padding-top: .5rem; padding-bottom: .5rem; }
+      #bottomNav button { font-size: .9rem; }
+    }
+    @supports(padding: max(0px)) { .safe-area-bottom { padding-bottom: max(.5rem, env(safe-area-inset-bottom)); } }
+    @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+    @media (prefers-color-scheme: dark) {
+      .dark-mode-compatible { background-color: #111827; color: #e5e7eb; }
+      body { background: linear-gradient(180deg, #0b1020, #0b1020) !important; }
+    }
+
+    #appVersionChip { transition: background-color .2s ease, transform .15s ease; }
+    #appVersionChip:hover { transform: translateY(-1px); }
+
+    /* Auth overlay */
+    #authOverlay { background: radial-gradient(1000px 600px at 90% -100%, #e0f2fe 0%, transparent 60%), radial-gradient(1200px 800px at -20% 120%, #e9d5ff 0%, transparent 60%), linear-gradient(180deg, #ffffff, #f8fafc); }
+    .auth-card { animation: pop .25s ease; }
+    @keyframes pop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    /* User dropdown */
+    #userMenu { transition: opacity .15s ease, transform .15s ease; }
+    #userMenu.hidden-menu { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+  </style>
+</head>
+
+<body class="min-h-screen text-slate-800 mobile-padding">
+  <!-- =============================================================
+       AUTH OVERLAY (login / first-time admin setup)
+       ============================================================= -->
+  <div id="authOverlay" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div class="auth-card w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white p-6 text-center">
+        <div class="bg-white/15 inline-flex p-3 rounded-xl mb-3"><i class="fa-solid fa-file-pdf text-2xl"></i></div>
+        <h2 class="text-xl font-bold">De ISUS a PRA</h2>
+        <p id="authSubtitle" class="text-blue-100 text-sm mt-1">Inicia sesión para continuar</p>
+      </div>
+
+      <div id="authLoading" class="p-8 flex flex-col items-center justify-center">
+        <div class="loader mb-3"></div>
+        <p class="text-slate-500 text-sm">Conectando con Firebase…</p>
+      </div>
+
+      <!-- Login form -->
+      <div id="loginForm" class="hidden p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Usuario</label>
+          <div class="relative">
+            <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="loginUser" type="text" autocomplete="username"
+              class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="usuario" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Contraseña</label>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="loginPass" type="password" autocomplete="current-password"
+              class="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="••••••••" />
+            <button type="button" onclick="togglePassword('loginPass', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div id="loginError" class="hidden p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
+          <i class="fa-solid fa-circle-exclamation"></i><span></span>
+        </div>
+        <button onclick="doLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2">
+          <i class="fa-solid fa-right-to-bracket"></i> Entrar
+        </button>
+      </div>
+
+      <!-- First-time admin setup -->
+      <div id="setupForm" class="hidden p-6 space-y-4">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+          <i class="fa-solid fa-triangle-exclamation text-amber-600 mt-0.5"></i>
+          <div class="text-amber-800 text-sm">
+            <p class="font-semibold">Primer arranque</p>
+            <p class="text-amber-700 text-xs mt-1">No existe ningún administrador todavía. Crea el usuario administrador inicial. Esta operación solo se realiza una vez.</p>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Usuario admin</label>
+          <div class="relative">
+            <i class="fa-solid fa-user-shield absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="setupUser" type="text" autocomplete="username"
+              class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="admin" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Contraseña</label>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="setupPass1" type="password" autocomplete="new-password"
+              class="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="••••••••" />
+            <button type="button" onclick="togglePassword('setupPass1', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Repite la contraseña</label>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="setupPass2" type="password" autocomplete="new-password"
+              class="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="••••••••" />
+            <button type="button" onclick="togglePassword('setupPass2', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div id="setupError" class="hidden p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
+          <i class="fa-solid fa-circle-exclamation"></i><span></span>
+        </div>
+        <button onclick="doSetupAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2">
+          <i class="fa-solid fa-user-shield"></i> Crear administrador
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       HEADER
+       ============================================================= -->
+  <header class="shadow-sm sticky top-0 z-40">
+    <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-[var(--header-h)] flex items-center justify-between gap-2">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="bg-white/15 text-white p-2 rounded-lg text-xl">📄</div>
+          <h1 class="text-lg md:text-xl font-bold tracking-tight truncate">De ISUS a PRA</h1>
+          <span id="appVersionChip"
+                class="hidden md:inline-flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[11px] font-semibold px-2 py-0.5 rounded-full border border-white/25 backdrop-blur-sm cursor-default"
+                title="Versión de la aplicación">
+            <i class="fa-solid fa-code-branch text-[9px] opacity-90"></i>
+            <span id="appVersionText">v…</span>
+          </span>
+          <span id="courseChip"
+                class="hidden md:inline-flex items-center gap-1 bg-emerald-400/20 text-emerald-50 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-emerald-200/30"
+                title="Curso académico actual">
+            <i class="fa-solid fa-calendar-days text-[9px] opacity-90"></i>
+            <span id="courseChipText">—</span>
+          </span>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="text-sm opacity-90 hidden lg:block">
+            <span id="headerScreenTitle">Paso 1: Carga y Consolidación</span>
+          </div>
+
+          <!-- User menu -->
+          <div class="relative">
+            <button id="userMenuBtn" onclick="toggleUserMenu()" class="flex items-center gap-2 bg-white/15 hover:bg-white/25 rounded-full pl-2 pr-3 py-1.5 transition">
+              <div class="w-7 h-7 rounded-full bg-white/25 flex items-center justify-center text-sm font-bold">
+                <i class="fa-solid fa-user text-xs"></i>
+              </div>
+              <span id="userMenuName" class="text-sm font-medium max-w-[120px] truncate">—</span>
+              <span id="userMenuRole" class="text-[10px] uppercase font-bold bg-white/20 px-1.5 py-0.5 rounded hidden sm:inline">—</span>
+              <i class="fa-solid fa-chevron-down text-[10px] opacity-80"></i>
+            </button>
+            <div id="userMenu" class="hidden-menu absolute right-0 mt-2 w-60 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden text-slate-700">
+              <div class="px-4 py-3 border-b border-slate-100">
+                <p class="text-xs text-slate-400 uppercase font-semibold">Conectado</p>
+                <p id="userMenuFull" class="font-semibold truncate">—</p>
+                <p id="userMenuRoleLbl" class="text-xs text-slate-500 mt-0.5">—</p>
+              </div>
+              <button onclick="openSavedPrasModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
+                <i class="fa-solid fa-folder-open text-blue-600 w-5"></i> PRAs guardados
+              </button>
+              <button id="userMgmtMenuBtn" onclick="openUserManagementModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
+                <i class="fa-solid fa-users-gear text-violet-600 w-5"></i> Gestión de usuarios
+              </button>
+              <button onclick="logoutUser()" class="w-full text-left px-4 py-2.5 hover:bg-red-50 text-red-600 flex items-center gap-3 text-sm border-t border-slate-100">
+                <i class="fa-solid fa-right-from-bracket w-5"></i> Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- =============================================================
+       USER MANAGEMENT MODAL (admin only)
+       ============================================================= -->
+  <div id="userMgmtModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto">
+      <div class="bg-gradient-to-r from-violet-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+        <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-users-gear"></i> Gestión de usuarios</h2>
+        <button onclick="closeUserManagementModal()" class="text-white hover:text-violet-200 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="p-6 space-y-6">
+        <!-- Create user form -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+          <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-user-plus text-emerald-600"></i> Crear nuevo usuario</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Usuario</label>
+              <input id="newUserUsername" type="text" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="ej. profe_juan" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Perfil</label>
+              <select id="newUserRole" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                <option value="user">Usuario (solo visualización)</option>
+                <option value="admin">Administrador (control total)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Contraseña</label>
+              <input id="newUserPass1" type="password" autocomplete="new-password" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="••••••••" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Repetir contraseña</label>
+              <input id="newUserPass2" type="password" autocomplete="new-password" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="••••••••" />
+            </div>
+          </div>
+          <div id="newUserError" class="hidden mt-3 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
+            <i class="fa-solid fa-circle-exclamation"></i><span></span>
+          </div>
+          <div id="newUserOk" class="hidden mt-3 p-3 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-sm flex items-center gap-2">
+            <i class="fa-solid fa-circle-check"></i><span></span>
+          </div>
+          <button onclick="adminCreateUser()" class="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-user-plus"></i> Crear usuario
+          </button>
+        </div>
+
+        <!-- Users list -->
+        <div>
+          <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-list text-slate-600"></i> Usuarios existentes</h3>
+          <div id="usersList" class="space-y-2">
+            <div class="text-center text-slate-400 text-sm py-6">
+              <div class="loader mx-auto mb-2"></div>
+              Cargando usuarios…
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       SAVED PRAs MODAL (filter by academic year)
+       ============================================================= -->
+  <div id="savedPrasModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-y-auto">
+      <div class="bg-gradient-to-r from-blue-600 to-cyan-600 text-white p-4 rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+        <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-folder-open"></i> PRAs guardados</h2>
+        <button onclick="closeSavedPrasModal()" class="text-white hover:text-blue-200 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-semibold text-slate-600">Curso académico:</label>
+            <select id="savedPrasYearFilter" onchange="renderSavedPrasList()" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="">Cargando…</option>
+            </select>
+          </div>
+          <button onclick="refreshSavedPras()" class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+            <i class="fa-solid fa-rotate-right"></i> Refrescar
+          </button>
+        </div>
+        <div id="savedPrasList" class="space-y-2">
+          <div class="text-center text-slate-400 text-sm py-6">Selecciona un curso para ver los PRAs guardados.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       EXISTING MODALS (help, validation)
+       ============================================================= -->
+  <div id="helpModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+    <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto dark-mode-compatible">
+      <div class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center">
+        <h2 class="text-xl font-bold">Ayuda — De ISUS a PRA</h2>
+        <button onclick="closeHelp()" class="text-white hover:text-blue-200 text-2xl">&times;</button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+          <h3 class="font-bold text-blue-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-circle-info"></i> ¿Qué es De ISUS a PRA?</h3>
+          <p class="text-blue-700 text-sm">Genera Programas de Refuerzo del Aprendizaje (PRA) según el formato Séneca a partir de informes de suspensos procedentes también de Séneca (PDF), consolidando criterios, perfiles y actividades. Los PRAs se guardan en Firebase, aislados por curso académico (1 de septiembre – 31 de agosto).</p>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-play text-green-600"></i> Paso 1: Carga y Consolidación</h3>
+          <ul class="text-sm text-slate-600 space-y-2 ml-6 list-disc">
+            <li><span class="font-semibold">Carga PDFs:</span> arrastra o haz clic para cargar informes del mismo alumno</li>
+            <li><span class="font-semibold">Indica grupo y tutor/a:</span> obligatorios para generar el PRA</li>
+            <li><span class="font-semibold">Selecciona evaluaciones:</span> haz clic en cada evaluación para incluirla</li>
+            <li><span class="font-semibold">Filtra criterios:</span> todos, aprobados, suspensos o no evaluados</li>
+            <li><span class="font-semibold">Exporta los criterios filtrados:</span> en formato JSON o CSV</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-user-tag text-blue-600"></i> Paso 2: Plan de Mejora y Recuperación</h3>
+          <ul class="text-sm text-slate-600 space-y-2 ml-6 list-disc">
+            <li><span class="font-semibold">Perfil:</span> elige según pendientes o repetición</li>
+            <li><span class="font-semibold">Revisa criterios:</span> organiza por materia</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-list-check text-purple-600"></i> Paso 3: Plan de Recuperación</h3>
+          <ul class="text-sm text-slate-600 space-y-2 ml-6 list-disc">
+            <li><span class="font-semibold">Repetidor TEC4 sin pendientes:</span> muestra todos los criterios de la materia.</li>
+            <li><span class="font-semibold">Repetidor TEC4 con pendientes:</span> muestra los criterios de las materias pendientes relacionados con los de TEC4.</li>
+            <li><span class="font-semibold">Alumnado solo con pendientes:</span> muestra los criterios que tendrán que recuperarse.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-gears text-orange-600"></i> Paso 4: Otros Aspectos a Trabajar</h3>
+          <ul class="text-sm text-slate-600 space-y-2 ml-6 list-disc">
+            <li><span class="font-semibold">TIPO DE ACTIVIDADES Y TAREAS:</span> defínelas en "Tareas (precisar)" o marca los checks.</li>
+            <li><span class="font-semibold">FORMAS DE ACCESO A LA INFORMACIÓN:</span> marca checks o escribe en "Otras (especificar)".</li>
+            <li><span class="font-semibold">RECURSOS DIDÁCTICOS:</span> selecciona checks o escribe en "Otros (especificar)".</li>
+            <li><span class="font-semibold">AGRUPAMIENTOS, DISTRIBUCIÓN DE ESPACIOS Y TIEMPOS:</span> selecciona checks o escribe en "Otros (especificar)".</li>
+            <li><span class="font-semibold">INSTRUMENTOS DE EVALUACIÓN:</span> selecciona checks o escribe en "Otros (especificar)".</li>
+          </ul>
+        </div>
+        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+          <h3 class="font-bold text-yellow-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-lightbulb"></i> Consejos clave</h3>
+          <ul class="text-sm text-yellow-700 space-y-1 ml-6 list-disc">
+            <li>Solo PDFs del mismo alumno</li>
+            <li>Detecta duplicados automáticamente</li>
+            <li>Detecta repetición (TEC4 + cursos inferiores)</li>
+            <li>Los PRAs se guardan automáticamente en el curso académico actual</li>
+          </ul>
+        </div>
+        <div class="text-center pt-2">
+          <button onclick="closeHelp()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold">Entendido, ¡empecemos!</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="validationModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+      <div class="bg-red-600 text-white p-4 rounded-t-2xl flex justify-between items-center">
+        <h2 class="text-xl font-bold">Validación requerida</h2>
+        <button onclick="closeValidationModal()" class="text-white hover:text-red-200 text-2xl">&times;</button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="flex items-start gap-3">
+          <i class="fa-solid fa-triangle-exclamation text-red-500 text-xl mt-1"></i>
+          <div>
+            <div id="validationMessage" class="text-slate-700 mb-3">Se han marcado 0 ítems en la subsección.</div>
+            <p class="text-slate-600 text-sm">Selecciona al menos un ítem en cada subsección antes de generar el PRA.</p>
+          </div>
+        </div>
+        <div class="text-center pt-2">
+          <button onclick="closeValidationModal()" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold">Entendido</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       MAIN APP
+       ============================================================= -->
+  <main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 max-w-7xl">
+    <!-- Screen 1 -->
+    <div id="screen1" class="flex flex-col lg:flex-row gap-6">
+      <!-- Left column -->
+      <div class="w-full lg:w-1/3 space-y-6">
+        <div id="uploadSection" class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-xl font-bold text-slate-800">Cargar ISUS</h2>
+            <button onclick="showHelp()" class="text-blue-600 hover:text-blue-800" title="Ayuda">
+              <i class="fa-solid fa-circle-question text-xl"></i>
+            </button>
+          </div>
+          <p class="text-slate-500 text-sm mb-3">Añade informes PDF (solo del mismo alumno)</p>
+
+          <div id="dropZone"
+               class="drop-zone border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer bg-white/65 hover:bg-blue-50 transition-all">
+            <input type="file" id="fileInput" class="hidden" accept=".pdf" multiple>
+            <div class="mb-2 text-blue-600"><i class="fa-solid fa-file-circle-plus text-4xl"></i></div>
+            <p class="text-md font-semibold text-slate-700">Arrastra o haz clic para cargar</p>
+          </div>
+
+          <div id="errorMessage" class="hidden mt-4 p-3 bg-red-50 text-red-700 rounded-lg border border-red-200 text-sm flex items-center gap-3">
+            <i class="fa-solid fa-circle-exclamation"></i><span id="errorText">Error procesando el archivo.</span>
+          </div>
+          <div id="loadingState" class="hidden flex-col items-center justify-center mt-4">
+            <div class="loader mb-2"></div>
+            <p class="text-slate-600 text-sm">Analizando PDF...</p>
+          </div>
+        </div>
+
+        <div id="loadedEvaluationsSection" class="bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-slate-200 overflow-hidden hidden">
+          <div class="bg-slate-100 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-table-list text-blue-600"></i>
+              <h3 class="font-bold text-slate-800 text-lg">Evaluaciones (<span id="evalCount">0</span>)</h3>
+            </div>
+            <button onclick="clearAllData()" class="text-red-500 hover:text-red-700 text-sm font-medium flex items-center gap-1">
+              <i class="fa-solid fa-trash-can"></i> Borrar todo
+            </button>
+          </div>
+          <div id="evaluationsList" class="divide-y divide-slate-100 max-h-96 overflow-y-auto"></div>
+          <div class="bg-slate-50 p-3 text-sm text-slate-600 border-t border-slate-200 font-medium">
+            Clic en la fila para seleccionar. Papelera para borrar.
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column -->
+      <div class="w-full lg:w-2/3 space-y-6">
+        <div id="initialMessage" class="flex flex-col items-center justify-center py-16 md:py-20 bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-slate-200">
+          <i class="fa-solid fa-file-pdf text-6xl text-slate-300 mb-4"></i>
+          <h3 class="text-xl font-semibold text-slate-700">Esperando informes PDF</h3>
+          <p class="text-slate-500 text-sm">Carga y selecciona archivos para empezar a consolidar los criterios.</p>
+          <button onclick="showHelp()" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <i class="fa-solid fa-circle-question"></i> Ver ayuda
+          </button>
+        </div>
+
+        <div id="resultsSection" class="hidden space-y-6">
+          <div class="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/80 p-4 rounded-2xl shadow-sm border border-slate-200">
+            <div class="text-sm font-medium text-slate-600 flex items-center gap-2">
+              <i class="fa-solid fa-eye text-blue-600"></i>
+              Consolidando: <span id="currentSelectionCount" class="font-bold text-slate-800">0 Materias</span>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="exportJSON()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                <i class="fa-solid fa-code"></i> JSON
+              </button>
+              <button onclick="exportCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">
+                <i class="fa-solid fa-file-csv"></i> CSV
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-white/80 rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-user-graduate text-blue-600"></i>
+              <h3 class="font-bold text-slate-800">Datos del alumno</h3>
+            </div>
+            <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Alumno/a</p>
+                <p id="resName" class="text-lg font-medium text-slate-900">-</p>
+              </div>
+              <div>
+                <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Materia/s consolidadas</p>
+                <p id="resSubject" class="text-lg font-medium text-slate-900">-</p>
+              </div>
+              <div>
+                <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Curso</p>
+                <div class="flex items-center gap-2">
+                  <span id="resCourse" class="text-lg font-bold text-blue-600">-</span>
+                </div>
+              </div>
+            </div>
+            <!-- Campos adicionales: grupo y tutor/a -->
+            <div class="px-6 pb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label for="studentGroup" class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Grupo <span class="text-red-500">*</span>
+                </label>
+                <input id="studentGroup" type="text" placeholder="ej. 4ºA"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+              </div>
+              <div>
+                <label for="studentTutor" class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                  Tutor/a <span class="text-red-500">*</span>
+                </label>
+                <input id="studentTutor" type="text" placeholder="ej. Prof. García"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+              </div>
+              <div>
+                <label for="studentCourseLabel" class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Curso académico</label>
+                <input id="studentCourseLabel" type="text" readonly
+                  class="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-600 cursor-not-allowed" />
+              </div>
+            </div>
+          </div>
+
+          <div id="filterButtonsContainer" class="flex flex-wrap gap-2 bg-white/80 p-4 rounded-2xl shadow-sm border border-slate-200">
+            <button id="filterAll" onclick="filterCriteria('all', this)"
+                    class="filter-button px-3.5 py-2 rounded-lg text-sm font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200 active">
+              <i class="fa-solid fa-grip-lines"></i> Todos
+            </button>
+            <button id="filterApproved" onclick="filterCriteria('approved', this)"
+                    class="filter-button px-3.5 py-2 rounded-lg text-sm font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
+              <i class="fa-solid fa-circle-check"></i> Aprobados
+            </button>
+            <button id="filterFailed" onclick="filterCriteria('failed', this)"
+                    class="filter-button px-3.5 py-2 rounded-lg text-sm font-semibold bg-rose-100 text-rose-700 hover:bg-rose-200">
+              <i class="fa-solid fa-circle-xmark"></i> Suspensos
+            </button>
+            <button id="filterUnevaluated" onclick="filterCriteria('unevaluated', this)"
+                    class="filter-button px-3.5 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">
+              <i class="fa-solid fa-circle-question"></i> No evaluados
+            </button>
+          </div>
+
+          <div class="bg-white/80 rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div class="flex items-center gap-2"><i class="fa-solid fa-list-check text-blue-600"></i>
+                <h3 class="font-bold text-slate-800">Criterios consolidados</h3>
+              </div>
+              <span id="criteriaCount" class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">0 Criterios</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-slate-50 text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">
+                    <th class="px-6 py-3 font-semibold w-32">Código</th>
+                    <th class="px-6 py-3 font-semibold">Enunciado del criterio</th>
+                    <th class="px-6 py-3 font-semibold w-32 text-right">Calificación</th>
+                  </tr>
+                </thead>
+                <tbody id="resultsTableBody" class="divide-y divide-slate-100 text-sm"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 2 -->
+    <div id="screen2" class="hidden flex flex-col items-center justify-center pt-8 md:pt-10">
+      <div class="w-full max-w-4xl bg-white/85 rounded-2xl shadow-xl border border-slate-200 p-6 md:p-8 space-y-6">
+        <div class="text-center">
+          <h2 class="text-xl md:text-2xl font-bold text-slate-800 mb-1">Paso 2: Plan de mejora y recuperación</h2>
+          <p class="text-slate-500 mobile-text-sm">Selecciona el perfil del alumno y los criterios a reforzar.</p>
+        </div>
+
+        <div id="studentProfileContainer" class="bg-slate-50 p-4 md:p-5 rounded-xl border border-slate-200 shadow-sm">
+          <h3 class="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-user-tag text-blue-600"></i> Perfil del alumnado
+          </h3>
+          <div id="profileWarning" class="hidden mb-4 p-3 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-lg text-sm flex items-start gap-3">
+            <i class="fa-solid fa-triangle-exclamation mt-0.5"></i>
+            <div><span class="font-bold">Aviso:</span> <span id="warningText">No se ha detectado el PDF de TEC4. Si cambias el perfil, asegúrate de que sea correcto.</span></div>
+          </div>
+
+          <div id="profileOptionsContainer" class="space-y-3">
+            <div class="relative">
+              <input type="radio" id="profileOption1" name="studentProfile" value="option1" class="peer hidden">
+              <label for="profileOption1"
+                     class="flex items-center p-3 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition peer-checked:border-blue-500 peer-checked:bg-blue-50 peer-checked:text-blue-800">
+                <div class="w-5 h-5 border-2 border-slate-300 rounded-full flex items-center justify-center mr-3 peer-checked:border-blue-600 peer-checked:bg-blue-600">
+                  <div class="w-2 h-2 bg-white rounded-full opacity-0 transition-opacity check-icon"></div>
+                </div>
+                <span class="font-medium mobile-text-sm">Alumnado CON materias pendientes</span>
+              </label>
+            </div>
+            <div class="relative">
+              <input type="radio" id="profileOption2" name="studentProfile" value="option2" class="peer hidden">
+              <label for="profileOption2"
+                     class="flex items-center p-3 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition peer-checked:border-blue-500 peer-checked:bg-blue-50 peer-checked:text-blue-800">
+                <div class="w-5 h-5 border-2 border-slate-300 rounded-full flex items-center justify-center mr-3 peer-checked:border-blue-600 peer-checked:bg-blue-600">
+                  <div class="w-2 h-2 bg-white rounded-full opacity-0 transition-opacity check-icon"></div>
+                </div>
+                <span class="font-medium mobile-text-sm">Repetidor SIN materias pendientes (TEC4)</span>
+              </label>
+            </div>
+            <div class="relative">
+              <input type="radio" id="profileOption3" name="studentProfile" value="option3" class="peer hidden">
+              <label for="profileOption3"
+                     class="flex items-center p-3 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition peer-checked:border-blue-500 peer-checked:bg-blue-50 peer-checked:text-blue-800">
+                <div class="w-5 h-5 border-2 border-slate-300 rounded-full flex items-center justify-center mr-3 peer-checked:border-blue-600 peer-checked:bg-blue-600">
+                  <div class="w-2 h-2 bg-white rounded-full opacity-0 transition-opacity check-icon"></div>
+                </div>
+                <span class="font-medium mobile-text-sm">Repetidor CON materias pendientes</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="recoveryCriteriaList" class="space-y-3"></div>
+
+        <div id="noFailedCriteriaMessage" class="hidden text-center p-6 md:p-8 bg-green-50 rounded-xl border border-green-200">
+          <i class="fa-solid fa-trophy text-4xl text-green-500 mb-3"></i>
+          <h3 class="text-lg font-bold text-green-800">¡Todo aprobado!</h3>
+          <p class="text-green-600 mobile-text-sm">No se han encontrado criterios suspensos o no evaluados.</p>
+        </div>
+
+        <div id="selectedCriterionDetails" class="hidden mt-2 p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-2">
+          <p class="text-sm font-semibold text-blue-700">Criterio seleccionado para refuerzo:</p>
+          <p id="detailCode" class="text-lg font-bold text-blue-800 font-mono"></p>
+          <p id="detailDescription" class="text-sm text-slate-700 text-justify leading-relaxed"></p>
+          <p id="detailSource" class="text-xs text-blue-600 font-medium italic"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3 -->
+    <div id="screen3" class="hidden flex flex-col items-center justify-center pt-8 md:pt-10">
+      <div class="w-full max-w-6xl bg-white/85 rounded-2xl shadow-xl border border-slate-200 p-6 md:p-8 space-y-6">
+        <div class="text-center">
+          <h2 class="text-xl md:text-2xl font-bold text-slate-800 mb-1">Paso 3: Plan de recuperación</h2>
+          <p class="text-slate-500 mobile-text-sm">Actividades de refuerzo y recuperación basadas en criterios no superados.</p>
+        </div>
+        <div id="screen3Content"></div>
+      </div>
+    </div>
+
+    <!-- Screen 4 -->
+    <div id="screen4" class="hidden flex flex-col items-center justify-center pt-8 md:pt-10">
+      <div class="w-full max-w-6xl bg-white/85 rounded-2xl shadow-xl border border-slate-200 p-6 md:p-8 space-y-6">
+        <div class="text-center">
+          <h2 class="text-xl md:text-2xl font-bold text-slate-800 mb-1">Paso 4: Otros aspectos a trabajar en el programa</h2>
+          <p class="text-slate-500 mobile-text-sm">Selecciona las estrategias, recursos y metodologías para el refuerzo.</p>
+        </div>
+        <div id="additional-fields-container" class="space-y-4 max-h-[520px] overflow-y-auto pr-1.5"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom nav -->
+  <div id="bottomNav" class="bottom-nav fixed bottom-0 left-0 right-0 bg-white/90 border-t border-slate-200 z-30 safe-area-bottom shadow-xl">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div id="footerButtons1" class="w-full flex justify-end py-1">
+        <button onclick="goToScreen(2)" id="nextButton"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2"
+                disabled>
+          Siguiente <i class="fa-solid fa-arrow-right ml-1"></i>
+        </button>
+      </div>
+      <div id="footerButtons2" class="w-full flex justify-between items-center hidden py-1">
+        <button onclick="goToScreen(1)"
+                class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2">
+          <i class="fa-solid fa-arrow-left mr-1"></i> Atrás
+        </button>
+        <button onclick="goToScreen(3)"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2">
+          Siguiente <i class="fa-solid fa-arrow-right ml-1"></i>
+        </button>
+      </div>
+      <div id="footerButtons3" class="w-full flex justify-between items-center hidden py-1">
+        <button onclick="goToScreen(2)"
+                class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2">
+          <i class="fa-solid fa-arrow-left mr-1"></i> Atrás
+        </button>
+        <button onclick="goToScreen(4)"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2">
+          Siguiente <i class="fa-solid fa-arrow-right ml-1"></i>
+        </button>
+      </div>
+      <div id="footerButtons4" class="w-full flex justify-between items-center hidden py-1">
+        <button onclick="goToScreen(3)"
+                class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2">
+          <i class="fa-solid fa-arrow-left mr-1"></i> Atrás
+        </button>
+        <div class="flex gap-2 md:gap-3">
+          <button onclick="resetApp()"
+                  class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto">
+            <i class="fa-solid fa-plus"></i> Nuevo alumno
+          </button>
+          <button onclick="generatePRA()"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Generar PRA
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       SCRIPTS
+       ============================================================ -->
+  <script>
+  'use strict';
+
+  /* ============================================================
+   * FIREBASE INIT
+   * ============================================================ */
+  const firebaseConfig = {
+    apiKey: "AIzaSyAsJ3PnUTp7SOizYQgoKbnMBJoaRKNIbMM",
+    authDomain: "tecdea.firebaseapp.com",
+    databaseURL: "https://tecdea-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "tecdea",
+    storageBucket: "tecdea.firebasestorage.app",
+    messagingSenderId: "53877853663",
+    appId: "1:53877853663:web:97b722481e4f96aa13886a"
+  };
+  let fbApp = null, fbAuth = null, fbDb = null;
+  try {
+    fbApp = firebase.initializeApp(firebaseConfig, 'isustopra-primary');
+    fbAuth = fbApp.auth();
+    fbDb   = fbApp.database();
+  } catch (e) {
+    console.error('Error inicializando Firebase:', e);
+  }
+
+  /* ============================================================
+   * NAMESPACE DE BASE DE DATOS — AISLAMIENTO DE DATOS
+   * ------------------------------------------------------------
+   * Todos los datos de esta aplicación viven bajo /isustopra/ en la
+   * Realtime Database compartida. Así, aunque el proyecto Firebase
+   * (tecdea) se use para otras aplicaciones, los datos de ISUStoPRA
+   * no se mezclan con los de ninguna otra app.
+   *
+   * Cualquier referencia a la BD debe construirse con fbPath()
+   * para garantizar el aislamiento.
+   * ============================================================ */
+  const FB_NAMESPACE = 'isustopra';
+  function fbPath(relativePath) {
+    // Si la ruta ya empieza con el namespace (por seguridad), no duplicar
+    const p = String(relativePath || '').trim().replace(/^\/+|\/+$/g, '');
+    if (!p) return FB_NAMESPACE;
+    // Evita doble prefijo si alguien pasa 'isustopra/...'
+    if (p === FB_NAMESPACE || p.startsWith(FB_NAMESPACE + '/')) return p;
+    return `${FB_NAMESPACE}/${p}`;
+  }
+
+  /* ============================================================
+   * ESTADO GLOBAL AUTH
+   * ============================================================ */
+  let currentUser = null;        // { uid, username, role, email }
+  let adminInitialized = null;   // null=desconocido, true/false
+  let savedPrasCache = {};       // { yearId: [pra, ...] }
+  let usersCache = {};           // { uid: { username, role, ... } }
+
+  /* ============================================================
+   * CURSO ACADÉMICO (1 sep – 31 ago)
+   * ============================================================ */
+  function getCurrentAcademicYear(date) {
+    const d = date ? new Date(date) : new Date();
+    const y = d.getFullYear();
+    const m = d.getMonth(); // 0-11
+    if (m >= 8) return `${y}-${y + 1}`;   // sep-dic
+    return `${y - 1}-${y}`;                // ene-ago
+  }
+  function academicYearStart(yearId) {
+    const [startY] = yearId.split('-').map(Number);
+    return new Date(startY, 8, 1); // 1 sep
+  }
+  function academicYearEnd(yearId) {
+    const [, endY] = yearId.split('-').map(Number);
+    return new Date(endY, 7, 31, 23, 59, 59); // 31 ago
+  }
+
+  /* ============================================================
+   * SANITIZACIÓN DE NOMBRES DE FICHERO — FIX TILDES
+   * ------------------------------------------------------------
+   * Antes: /[^a-z0-9]/gi eliminaba á, é, í, ó, ú, ñ, ç...
+   * Ahora: se conservan letras y números Unicode y solo se
+   * eliminan los caracteres problemáticos para FS y URLs.
+   * ============================================================ */
+  function sanitizeFilename(name) {
+    const fallback = 'Desconocido';
+    let s = (name == null ? '' : String(name)).normalize('NFC').trim();
+    if (!s) s = fallback;
+    s = s.replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_');
+    s = s.replace(/\s+/g, '_');
+    s = s.replace(/_+/g, '_');
+    s = s.replace(/^_+|_+$/g, '');
+    if (!s) s = fallback;
+    return s;
+  }
+
+  /* ============================================================
+   * DOM REFS (auth)
+   * ============================================================ */
+  const authOverlay        = document.getElementById('authOverlay');
+  const authLoading        = document.getElementById('authLoading');
+  const authSubtitle       = document.getElementById('authSubtitle');
+  const loginForm          = document.getElementById('loginForm');
+  const setupForm          = document.getElementById('setupForm');
+  const loginError         = document.getElementById('loginError');
+  const setupError         = document.getElementById('setupError');
+  const userMenuName       = document.getElementById('userMenuName');
+  const userMenuRole       = document.getElementById('userMenuRole');
+  const userMenuFull       = document.getElementById('userMenuFull');
+  const userMenuRoleLbl    = document.getElementById('userMenuRoleLbl');
+  const userMenu           = document.getElementById('userMenu');
+  const userMgmtMenuBtn    = document.getElementById('userMgmtMenuBtn');
+  const courseChip         = document.getElementById('courseChip');
+  const courseChipText     = document.getElementById('courseChipText');
+  const studentCourseLabel = document.getElementById('studentCourseLabel');
+
+  /* ============================================================
+   * AUTH UI HELPERS
+   * ============================================================ */
+  function showAuthOverlay(mode) {
+    authOverlay.classList.remove('hidden');
+    authLoading.classList.add('hidden');
+    loginForm.classList.add('hidden');
+    setupForm.classList.add('hidden');
+    if (mode === 'setup') {
+      setupForm.classList.remove('hidden');
+      authSubtitle.textContent = 'Configuración inicial — crea el usuario administrador';
+    } else if (mode === 'login') {
+      loginForm.classList.remove('hidden');
+      authSubtitle.textContent = 'Inicia sesión para continuar';
+    } else {
+      authLoading.classList.remove('hidden');
+      authSubtitle.textContent = 'Conectando…';
+    }
+  }
+  function hideAuthOverlay() { authOverlay.classList.add('hidden'); }
+
+  function setAuthError(el, msg) {
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.querySelector('span').textContent = msg;
+  }
+  function clearAuthError(el) {
+    if (!el) return;
+    el.classList.add('hidden');
+    el.querySelector('span').textContent = '';
+  }
+
+  function togglePassword(inputId, btn) {
+    const inp = document.getElementById(inputId);
+    if (!inp) return;
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = inp.type === 'password' ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+  }
+
+  function usernameToEmail(username) {
+    // Firebase Auth requiere email; usamos un dominio interno.
+    const safe = String(username || '').trim().toLowerCase()
+      .replace(/[^a-z0-9._-]/g, '');
+    return `${safe || 'user'}@tecdea.local`;
+  }
+
+  /* ============================================================
+   * ESTADO DE ADMIN INICIAL
+   * ============================================================ */
+  async function checkAdminInitialized() {
+    if (!fbDb) return false;
+    try {
+      const snap = await fbDb.ref(fbPath('meta/adminInitialized')).get();
+      return !!(snap && snap.val() === true);
+    } catch (e) {
+      console.warn('No se pudo leer meta/adminInitialized (¿reglas de seguridad?). Asumiendo false.', e);
+      return false;
+    }
+  }
+
+  /* ============================================================
+   * CREAR PRIMER ADMIN
+   * ============================================================ */
+  async function doSetupAdmin() {
+    clearAuthError(setupError);
+    const username = (document.getElementById('setupUser').value || '').trim();
+    const p1 = document.getElementById('setupPass1').value || '';
+    const p2 = document.getElementById('setupPass2').value || '';
+
+    if (!username) return setAuthError(setupError, 'Introduce un nombre de usuario.');
+    if (username.length < 3) return setAuthError(setupError, 'El usuario debe tener al menos 3 caracteres.');
+    if (!/^[a-zA-Z0-9._-]+$/.test(username)) return setAuthError(setupError, 'Solo letras, números, ".", "_" y "-".');
+    if (p1.length < 6) return setAuthError(setupError, 'La contraseña debe tener al menos 6 caracteres.');
+    if (p1 !== p2) return setAuthError(setupError, 'Las contraseñas no coinciden.');
+
+    const alreadyInit = await checkAdminInitialized();
+    if (alreadyInit) {
+      setAuthError(setupError, 'Ya existe un administrador. Inicia sesión.');
+      setTimeout(() => showAuthOverlay('login'), 1500);
+      return;
+    }
+
+    const email = usernameToEmail(username);
+    try {
+      const cred = await fbAuth.createUserWithEmailAndPassword(email, p1);
+      const uid = cred.user.uid;
+      await fbDb.ref(fbPath(`users/${uid}`)).set({
+        username: username,
+        role: 'admin',
+        email: email,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        createdBy: 'initial-setup'
+      });
+      await fbDb.ref(fbPath('meta/adminInitialized')).set(true);
+      // onAuthStateChanged se encargará del resto
+    } catch (e) {
+      console.error('Error creando admin inicial:', e);
+      setAuthError(setupError, translateFirebaseError(e));
+    }
+  }
+
+  /* ============================================================
+   * LOGIN
+   * ============================================================ */
+  async function doLogin() {
+    clearAuthError(loginError);
+    const username = (document.getElementById('loginUser').value || '').trim();
+    const password = document.getElementById('loginPass').value || '';
+    if (!username || !password) return setAuthError(loginError, 'Introduce usuario y contraseña.');
+    const email = usernameToEmail(username);
+    try {
+      await fbAuth.signInWithEmailAndPassword(email, password);
+    } catch (e) {
+      console.error('Error login:', e);
+      setAuthError(loginError, translateFirebaseError(e));
+    }
+  }
+
+  async function logoutUser() {
+    try { await fbAuth.signOut(); } catch (e) { console.error(e); }
+  }
+
+  /* ============================================================
+   * TRADUCIR ERRORES FIREBASE
+   * ============================================================ */
+  function translateFirebaseError(e) {
+    const code = e && e.code ? e.code : '';
+    const map = {
+      'auth/invalid-email': 'Usuario o contraseña incorrectos.',
+      'auth/user-disabled': 'Usuario deshabilitado.',
+      'auth/user-not-found': 'Usuario o contraseña incorrectos.',
+      'auth/wrong-password': 'Usuario o contraseña incorrectos.',
+      'auth/invalid-credential': 'Usuario o contraseña incorrectos.',
+      'auth/email-already-in-use': 'Ese nombre de usuario ya existe.',
+      'auth/weak-password': 'La contraseña es demasiado débil (mín. 6 caracteres).',
+      'auth/too-many-requests': 'Demasiados intentos. Inténtalo más tarde.',
+      'auth/network-request-failed': 'Sin conexión con el servidor.',
+      'auth/requires-recent-login': 'Debes volver a iniciar sesión para esta acción.'
+    };
+    return map[code] || (e && e.message ? e.message : 'Error desconocido.');
+  }
+
+  /* ============================================================
+   * ON AUTH STATE CHANGED
+   * ============================================================ */
+  if (fbAuth) {
+    fbAuth.onAuthStateChanged(async (user) => {
+      if (user) {
+        try {
+          const snap = await fbDb.ref(fbPath(`users/${user.uid}`)).get();
+          if (!snap || !snap.exists()) {
+            // El usuario existe en Auth pero no en DB: fue borrado
+            await fbAuth.signOut();
+            adminInitialized = await checkAdminInitialized();
+            showAuthOverlay(adminInitialized ? 'login' : 'setup');
+            return;
+          }
+          const meta = snap.val();
+          currentUser = { uid: user.uid, username: meta.username, role: meta.role || 'user', email: meta.email };
+
+          applyRoleUI();
+          hideAuthOverlay();
+          refreshCourseChip();
+        } catch (e) {
+          console.error('Error cargando metadata de usuario:', e);
+          try { await fbAuth.signOut(); } catch (_) {}
+          showAuthOverlay('login');
+          setAuthError(loginError, 'No se pudo cargar tu perfil. Contacta con el administrador.');
+        }
+      } else {
+        currentUser = null;
+        adminInitialized = await checkAdminInitialized();
+        showAuthOverlay(adminInitialized ? 'login' : 'setup');
+      }
+    });
+  } else {
+    showAuthOverlay('login');
+    setAuthError(loginError, 'No se pudo inicializar Firebase. Revisa la consola.');
+  }
+
+  /* ============================================================
+   * RBAC — UI SEGÚN ROL
+   * ============================================================ */
+  function applyRoleUI() {
+    if (!currentUser) return;
+    userMenuName.textContent = currentUser.username;
+    userMenuFull.textContent = currentUser.username;
+    const roleLbl = currentUser.role === 'admin' ? 'Administrador' : 'Usuario';
+    userMenuRole.textContent = currentUser.role;
+    userMenuRoleLbl.textContent = roleLbl;
+
+    if (currentUser.role === 'admin') {
+      userMgmtMenuBtn.classList.remove('hidden');
+      // Asegurar que se ven los botones de generación (por si volvemos de un rol user)
+      document.querySelectorAll('#footerButtons4 button').forEach(b => b.classList.remove('hidden'));
+    } else {
+      userMgmtMenuBtn.classList.add('hidden');
+      // Usuario de solo lectura: ocultar botones de generación y reset
+      document.querySelectorAll('#footerButtons4 button').forEach(b => {
+        const onclick = b.getAttribute('onclick') || '';
+        if (onclick === 'generatePRA()' || onclick === 'resetApp()') {
+          b.classList.add('hidden');
+        }
+      });
+    }
+  }
+
+  function refreshCourseChip() {
+    const yid = getCurrentAcademicYear();
+    courseChipText.textContent = yid;
+    courseChip.classList.remove('hidden');
+    if (studentCourseLabel) studentCourseLabel.value = yid;
+  }
+
+  function requireAdmin() {
+    if (!currentUser || currentUser.role !== 'admin') {
+      alert('Acción restringida a administradores.');
+      return false;
+    }
+    return true;
+  }
+
+  /* ============================================================
+   * MENÚ DE USUARIO (dropdown)
+   * ============================================================ */
+  function toggleUserMenu() {
+    userMenu.classList.toggle('hidden-menu');
+  }
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#userMenuBtn') && !e.target.closest('#userMenu')) {
+      userMenu.classList.add('hidden-menu');
+    }
+  });
+
+  /* ============================================================
+   * GESTIÓN DE USUARIOS (ADMIN)
+   * ============================================================ */
+  function openUserManagementModal() {
+    if (!requireAdmin()) return;
+    document.getElementById('userMgmtModal').classList.remove('hidden');
+    userMenu.classList.add('hidden-menu');
+    adminListUsers();
+  }
+  function closeUserManagementModal() {
+    document.getElementById('userMgmtModal').classList.add('hidden');
+    document.getElementById('newUserUsername').value = '';
+    document.getElementById('newUserPass1').value = '';
+    document.getElementById('newUserPass2').value = '';
+    document.getElementById('newUserRole').value = 'user';
+    clearAuthError(document.getElementById('newUserError'));
+    document.getElementById('newUserOk').classList.add('hidden');
+  }
+
+  async function adminCreateUser() {
+    if (!requireAdmin()) return;
+    const errEl = document.getElementById('newUserError');
+    const okEl  = document.getElementById('newUserOk');
+    clearAuthError(errEl);
+    okEl.classList.add('hidden');
+
+    const username = (document.getElementById('newUserUsername').value || '').trim();
+    const p1 = document.getElementById('newUserPass1').value || '';
+    const p2 = document.getElementById('newUserPass2').value || '';
+    const role = document.getElementById('newUserRole').value;
+
+    if (!username) return setAuthError(errEl, 'Introduce un nombre de usuario.');
+    if (username.length < 3) return setAuthError(errEl, 'El usuario debe tener al menos 3 caracteres.');
+    if (!/^[a-zA-Z0-9._-]+$/.test(username)) return setAuthError(errEl, 'Solo letras, números, ".", "_" y "-".');
+    if (p1.length < 6) return setAuthError(errEl, 'Contraseña mínima: 6 caracteres.');
+    if (p1 !== p2) return setAuthError(errEl, 'Las contraseñas no coinciden.');
+    if (role !== 'user' && role !== 'admin') return setAuthError(errEl, 'Perfil no válido.');
+
+    // Patrón "secondary app" para no cerrar la sesión del admin
+    let secondaryApp = null;
+    try {
+      secondaryApp = firebase.initializeApp(firebaseConfig, 'isustopra-secondary-' + Date.now());
+      const secondaryAuth = secondaryApp.auth();
+      const email = usernameToEmail(username);
+      const cred = await secondaryAuth.createUserWithEmailAndPassword(email, p1);
+      const uid = cred.user.uid;
+      await fbDb.ref(fbPath(`users/${uid}`)).set({
+        username: username,
+        role: role,
+        email: email,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        createdBy: currentUser.uid
+      });
+      await secondaryAuth.signOut();
+
+      okEl.classList.remove('hidden');
+      okEl.querySelector('span').textContent = `Usuario "${username}" creado con perfil "${role === 'admin' ? 'Administrador' : 'Usuario'}".`;
+      document.getElementById('newUserUsername').value = '';
+      document.getElementById('newUserPass1').value = '';
+      document.getElementById('newUserPass2').value = '';
+      await adminListUsers();
+    } catch (e) {
+      console.error('Error creando usuario:', e);
+      setAuthError(errEl, translateFirebaseError(e));
+    } finally {
+      if (secondaryApp) {
+        try { await secondaryApp.delete(); } catch (_) {}
+      }
+    }
+  }
+
+  async function adminListUsers() {
+    const list = document.getElementById('usersList');
+    if (!requireAdmin()) return;
+    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando usuarios…</div>';
+    try {
+      const snap = await fbDb.ref(fbPath('users')).orderByChild('createdAt').get();
+      if (!snap || !snap.exists()) {
+        list.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">No hay usuarios.</p>';
+        return;
+      }
+      const users = [];
+      snap.forEach(child => users.push({ uid: child.key, ...child.val() }));
+      usersCache = {};
+      users.forEach(u => usersCache[u.uid] = u);
+      users.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+      list.innerHTML = users.map(u => {
+        const isMe = currentUser && u.uid === currentUser.uid;
+        const isInitial = u.createdBy === 'initial-setup';
+        const dateStr = u.createdAt ? new Date(u.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+        const roleColor = u.role === 'admin' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700';
+        const roleLabel = u.role === 'admin' ? 'Admin' : 'Usuario';
+        const safeUser = (u.username || '').replace(/'/g, "\\'");
+        return `
+          <div class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:shadow-sm transition">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-9 h-9 rounded-full ${u.role === 'admin' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'} flex items-center justify-center font-bold uppercase">
+                ${(u.username || '?').charAt(0)}
+              </div>
+              <div class="min-w-0">
+                <p class="font-semibold text-slate-800 truncate">${u.username} ${isMe ? '<span class="text-xs text-blue-600 font-normal">(tú)</span>' : ''}</p>
+                <p class="text-xs text-slate-500">Creado: ${dateStr}${isInitial ? ' · inicial' : ''}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded ${roleColor}">${roleLabel}</span>
+              <button onclick="adminDeleteUser('${u.uid}', '${safeUser}')" ${isMe ? 'disabled' : ''}
+                class="text-slate-400 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                title="${isMe ? 'No puedes eliminarte a ti mismo' : 'Eliminar usuario'}">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error('Error listando usuarios:', e);
+      list.innerHTML = `<p class="text-center text-red-500 text-sm py-4">Error al cargar usuarios: ${e.message}</p>`;
+    }
+  }
+
+  async function adminDeleteUser(uid, username) {
+    if (!requireAdmin()) return;
+    if (uid === currentUser.uid) return alert('No puedes eliminar tu propia cuenta.');
+    if (!confirm(`¿Eliminar el usuario "${username}"?\n\nEsto borra sus datos de la base de datos. La cuenta de Firebase Auth permanecerá (no se puede borrar desde el cliente sin Admin SDK), pero el usuario no podrá iniciar sesión porque su metadata ya no existirá.`)) return;
+    try {
+      await fbDb.ref(fbPath(`users/${uid}`)).remove();
+      await adminListUsers();
+    } catch (e) {
+      console.error('Error eliminando usuario:', e);
+      alert('Error: ' + translateFirebaseError(e));
+    }
+  }
+
+  /* ============================================================
+   * PRAS GUARDADOS — Modal
+   * ============================================================ */
+  let savedPrasLastYearSelected = null;
+
+  function openSavedPrasModal() {
+    document.getElementById('savedPrasModal').classList.remove('hidden');
+    userMenu.classList.add('hidden-menu');
+    loadSavedPrasYears();
+  }
+  function closeSavedPrasModal() {
+    document.getElementById('savedPrasModal').classList.add('hidden');
+  }
+  async function refreshSavedPras() {
+    await loadSavedPrasYears(true);
+  }
+
+  async function loadSavedPrasYears(force) {
+    const sel = document.getElementById('savedPrasYearFilter');
+    try {
+      const snap = await fbDb.ref(fbPath('courses')).get();
+      const years = new Set();
+      if (snap && snap.exists()) {
+        snap.forEach(yearChild => years.add(yearChild.key));
+      }
+      years.add(getCurrentAcademicYear());
+
+      const sorted = Array.from(years).sort().reverse();
+      const prevSel = savedPrasLastYearSelected || (force ? sel.value : null);
+      sel.innerHTML = sorted.map(y => `<option value="${y}">${y}</option>`).join('');
+      if (prevSel && sorted.includes(prevSel)) sel.value = prevSel;
+      savedPrasLastYearSelected = sel.value;
+      await renderSavedPrasList();
+    } catch (e) {
+      console.error('Error cargando años:', e);
+      sel.innerHTML = '<option value="">—</option>';
+      document.getElementById('savedPrasList').innerHTML =
+        `<p class="text-center text-red-500 text-sm py-4">Error al cargar cursos: ${e.message}</p>`;
+    }
+  }
+
+  async function renderSavedPrasList() {
+    const sel = document.getElementById('savedPrasYearFilter');
+    const list = document.getElementById('savedPrasList');
+    const yearId = sel.value;
+    savedPrasLastYearSelected = yearId;
+    if (!yearId) {
+      list.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">Selecciona un curso.</p>';
+      return;
+    }
+    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando PRAs…</div>';
+    try {
+      const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras`)).orderByChild('generatedAt').get();
+      const pras = [];
+      if (snap && snap.exists()) {
+        snap.forEach(c => pras.push({ id: c.key, ...c.val() }));
+      }
+      pras.sort((a, b) => (b.generatedAt || 0) - (a.generatedAt || 0));
+      savedPrasCache[yearId] = pras;
+
+      if (pras.length === 0) {
+        list.innerHTML = '<p class="text-center text-slate-400 text-sm py-8">No hay PRAs guardados en este curso.</p>';
+        return;
+      }
+
+      const canDelete = currentUser && currentUser.role === 'admin';
+      list.innerHTML = pras.map(p => {
+        const dateStr = p.generatedAt ? new Date(p.generatedAt).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+        const profileLbl = ({ profileOption1: 'Pendientes', profileOption2: 'Repetición', profileOption3: 'Pend.+Repet.' })[p.profile] || '—';
+        const safeName = (p.studentName || '').replace(/"/g, '&quot;');
+        return `
+          <div class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:shadow-sm">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="font-semibold text-slate-800 truncate">${p.studentName || '—'}</p>
+                <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">${profileLbl}</span>
+              </div>
+              <p class="text-xs text-slate-500 mt-0.5">
+                <i class="fa-solid fa-users mr-1"></i>${p.group || '—'} ·
+                <i class="fa-solid fa-user-tie mx-1"></i>${p.tutor || '—'} ·
+                <i class="fa-solid fa-calendar-day mx-1"></i>${dateStr}
+              </p>
+            </div>
+            <div class="flex items-center gap-1">
+              <button onclick="viewSavedPRA('${yearId}', '${p.id}')" class="text-blue-600 hover:bg-blue-50 p-2 rounded-full" title="Ver / descargar PDF">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+              ${canDelete ? `<button onclick="deleteSavedPRA('${yearId}', '${p.id}', '${safeName}')" class="text-red-500 hover:bg-red-50 p-2 rounded-full" title="Eliminar"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error('Error listando PRAs:', e);
+      list.innerHTML = `<p class="text-center text-red-500 text-sm py-4">Error: ${e.message}</p>`;
+    }
+  }
+
+  async function deleteSavedPRA(yearId, praId, name) {
+    if (!requireAdmin()) return;
+    if (!confirm(`¿Eliminar el PRA de "${name}"?`)) return;
+    try {
+      await fbDb.ref(fbPath(`courses/${yearId}/pras/${praId}`)).remove();
+      await renderSavedPrasList();
+    } catch (e) {
+      alert('Error: ' + translateFirebaseError(e));
+    }
+  }
+
+  async function viewSavedPRA(yearId, praId) {
+    try {
+      const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras/${praId}`)).get();
+      if (!snap || !snap.exists()) return alert('PRA no encontrado.');
+      const data = snap.val();
+      regeneratePRAPdf(data);
+    } catch (e) {
+      console.error(e);
+      alert('Error al cargar PRA: ' + e.message);
+    }
+  }
+
+  /* ============================================================
+   * GUARDAR PRA EN FIREBASE
+   * ============================================================ */
+  async function savePRAToFirebase(praData) {
+    if (!fbDb) return null;
+    if (!currentUser) throw new Error('No autenticado');
+    const yearId = getCurrentAcademicYear();
+    const ref = fbDb.ref(fbPath(`courses/${yearId}/pras`)).push();
+    await ref.set({
+      ...praData,
+      generatedAt: firebase.database.ServerValue.TIMESTAMP,
+      generatedBy: currentUser.uid,
+      generatedByUsername: currentUser.username,
+      academicYear: yearId
+    });
+    return { yearId, praId: ref.key };
+  }
+
+  /* ============================================================
+   * ESTADO GLOBAL DE LA APP (original)
+   * ============================================================ */
+  let evaluations = [], selectedEvaluationIds = [], currentFilter = 'all', currentScreen = 1,
+      selectedRecoveryCriterion = null, consolidatedFailedCriteria = [],
+      selectedAdditionalFields = {}, textAreaState = { tareas: '', otros: {} };
+
+  /* ============================================================
+   * DOM REFS (app original)
+   * ============================================================ */
+  const dropZone = document.getElementById('dropZone'),
+        fileInput = document.getElementById('fileInput'),
+        resultsSection = document.getElementById('resultsSection'),
+        loadingState = document.getElementById('loadingState'),
+        errorMessage = document.getElementById('errorMessage'),
+        errorText = document.getElementById('errorText'),
+        tbody = document.getElementById('resultsTableBody'),
+        evaluationsListContainer = document.getElementById('evaluationsList'),
+        loadedEvaluationsSection = document.getElementById('loadedEvaluationsSection'),
+        initialMessage = document.getElementById('initialMessage'),
+        nextButton = document.getElementById('nextButton'),
+        headerScreenTitle = document.getElementById('headerScreenTitle'),
+        screen1 = document.getElementById('screen1'),
+        screen2 = document.getElementById('screen2'),
+        screen3 = document.getElementById('screen3'),
+        screen4 = document.getElementById('screen4'),
+        footerButtons1 = document.getElementById('footerButtons1'),
+        footerButtons2 = document.getElementById('footerButtons2'),
+        footerButtons3 = document.getElementById('footerButtons3'),
+        footerButtons4 = document.getElementById('footerButtons4'),
+        recoveryCriteriaListContainer = document.getElementById('recoveryCriteriaList'),
+        noFailedCriteriaMessage = document.getElementById('noFailedCriteriaMessage'),
+        selectedCriterionDetails = document.getElementById('selectedCriterionDetails'),
+        detailCode = document.getElementById('detailCode'),
+        detailDescription = document.getElementById('detailDescription'),
+        detailSource = document.getElementById('detailSource'),
+        profileWarning = document.getElementById('profileWarning'),
+        screen3Content = document.getElementById('screen3Content'),
+        additionalFieldsContainer = document.getElementById('additional-fields-container'),
+        bottomNav = document.getElementById('bottomNav');
+
+  /* ============================================================
+   * MAPEOS Y DATOS (sin cambios)
+   * ============================================================ */
+  const cyrToTec4Mapping = {
+    "CYR.3.1.1": ["TEC.4.4.1"], "CYR.3.1.2": ["TEC.4.4.1"], "CYR.3.1.3": ["TEC.4.4.2"],
+    "CYR.3.1.4": ["TEC.4.4.1"], "CYR.3.2.1": ["TEC.4.4.2", "TEC.4.3.1"], "CYR.3.2.2": ["TEC.4.4.2", "TEC.4.3.1"],
+    "CYR.3.2.3": ["TEC.4.4.2", "TEC.4.3.1"], "CYR.3.3.1": ["TEC.4.4.1", "TEC.4.2.2"], "CYR.3.4.1": ["TEC.4.4.2"],
+    "CYR.3.4.2": ["TEC.4.4.2"], "CYR.3.4.3": ["TEC.4.4.2"], "CYR.3.5.1": ["TEC.4.5.1"], "CYR.3.5.2": ["TEC.4.5.1"],
+    "CYR.3.6.1": ["TEC.4.6.1"], "CYR.3.6.2": ["TEC.4.6.1"], "CYR.3.6.3": ["TEC.4.6.1"], "CYR.3.6.4": ["TEC.4.6.1"]
+  };
+  const tydToTec4Mapping = {
+    "TYD.3.1.1": ["TEC.4.1.1"], "TYD.3.1.3": ["TEC.4.6.1"], "TYD.3.2.1": ["TEC.4.1.2", "TEC.4.1.3"], "TYD.3.2.2": ["TEC.4.2.2"],
+    "TYD.3.3.1": ["TEC.4.2.1", "TEC.4.2.2"], "TYD.3.4.1": ["TEC.4.3.1", "TEC.4.3.2"], "TYD.3.5.1": ["TEC.4.4.1"], "TYD.3.5.2": ["TEC.4.4.2"],
+    "TYD.3.5.3": ["TEC.4.4.1"], "TYD.3.6.2": ["TEC.4.5.1"], "TYD.3.6.3": ["TEC.4.5.1"], "TYD.3.7.1": ["TEC.4.6.1", "TEC.4.6.2"],
+    "TYD.3.7.2": ["TEC.4.6.3"]
+  };
+  const allTEC4Criteria = ["TEC.4.1.1","TEC.4.1.2","TEC.4.1.3","TEC.4.2.1","TEC.4.2.2","TEC.4.3.1","TEC.4.3.2","TEC.4.4.1","TEC.4.4.2","TEC.4.5.1","TEC.4.6.1","TEC.4.6.2","TEC.4.6.3"];
+  const tec4CriteriaDescriptions = {
+    "TEC.4.1.1":"Idear y planificar soluciones tecnológicas emprendedoras que generen un valor para la comunidad, a partir de la observación y el análisis del entorno.",
+    "TEC.4.1.2":"Aplicar estrategias colaborativas de gestión de proyectos siguiendo un proceso iterativo de validación, desde la ideación hasta la difusión.",
+    "TEC.4.1.3":"Gestionar proyectos de forma creativa con técnicas colaborativas y métodos de investigación para soluciones eficientes e inclusivas.",
+    "TEC.4.2.1":"Analizar el diseño de un producto que responda a una necesidad, evaluando demanda y ciclo de vida con criterio ético e inclusivo.",
+    "TEC.4.2.2":"Fabricar productos y soluciones aplicando CAD y técnicas manuales, mecánicas y digitales con recursos adecuados.",
+    "TEC.4.3.1":"Intercambiar información y fomentar el trabajo en equipo con herramientas digitales y lenguaje técnico adecuado.",
+    "TEC.4.3.2":"Presentar y difundir propuestas con buena entonación, expresión, gestión del tiempo y lenguaje inclusivo.",
+    "TEC.4.4.1":"Diseñar, construir, controlar y simular sistemas automáticos y robots aplicando conocimientos de control y mecánica/electrónica.",
+    "TEC.4.4.2":"Integrar IoT, big data e IA en sistemas tecnológicos con sentido crítico y ético.",
+    "TEC.4.5.1":"Resolver tareas con eficiencia usando y configurando aplicaciones y herramientas digitales con autonomía.",
+    "TEC.4.6.1":"Usar responsablemente la tecnología aplicando criterios de sostenibilidad y accesibilidad en materiales y procesos.",
+    "TEC.4.6.2":"Analizar beneficios de arquitectura bioclimática y ecotransporte para el desarrollo sostenible.",
+    "TEC.4.6.3":"Valorar proyectos tecnológicos de carácter social en comunidades abiertas, voluntariado o servicio a la comunidad."
+  };
+  const additionalFieldsData = {
+    "TIPO DE ACTIVIDADES Y TAREAS": ["Tareas (precisar)","Las mismas actividades que sus compañeros/as","Audio","Búsqueda y selección de información en diferentes medios (internet, prensa, libros, etc..)","Confeccionar e interpretar tablas, gráficas, informes, etc.","Elaboración de informes","Exposiciones","Infografía","Maqueta","Mural","Presentaciones","Simulaciones","Toma de apuntes","Vídeo"],
+    "FORMAS DE ACCESO A LA INFORMACIÓN": ["Otras (especificar)","Nada que resaltar en este aspecto","Aplicaciones informáticas específicas","Elaborar audios","Elaborar vídeos","Proporcionar acceso a webs","Proporcionar material adicional"],
+    "RECURSOS DIDÁCTICOS": ["Otros (especificar)","Nada que reseñar", "Agenda del alumno","Aplicaciones informáticas interactivas que faciliten la comprensión y expresión de los conceptos","Banco de recursos del departamento con diferentes niveles de competencia curricular","Calculadora","Classroom","Cuadernillos alternativos al libro de texto","Gráficos ilustrativos que ayuden a captar y organizar las ideas","Libro de texto ordinario","Libros de consulta","Maquetas realizadas previamente","Móvil","Páginas web informativas sobre los contenidos a trabajar en el aula","Pizarra digital","Recursos audiovisuales (vídeos, audios, fotografías, dibujos, etc.)","Software de aprendizaje, secuencias audiovisuales, enciclopedias en línea","Temporizador/reloj"],
+    "AGRUPAMIENTOS, DISTRIBUCIÓN DE ESPACIOS Y TIEMPOS": ["Otros (especificar)","Nada que especificar", "Ajustar la distribución del espacio a las necesidades del aprendizaje","Alternar las actividades académicas con tiempos de descanso (adaptarse a la 'curva de fatiga' del alumno)","Evitar los 'tiempos muertos' en los que el alumno se sienta incómodo o vulnerable","Grupos cooperativos/colaborativos","Priorizar el trabajo de grupo","Priorizar el trabajo individual para centrar su atención y facilitar el seguimiento personalizado","Sentar al alumno cerca del profesor/a y lejos de motivos de distracción","Tutoría entre Iguales"],
+    "INSTRUMENTOS DE EVALUACIÓN": ["Otros (especificar)","Los mismos que para sus compañeros","Antes de comenzar, leer el texto en voz alta una vez (ya sea de manera grupal o individual)","Cuidar el formato de los exámenes (claro, limpio)","Dar a conocer las fechas de las pruebas de evaluación con más de una semana de antelación","Disponer de un ejemplo que le facilite la comprensión de lo que tiene que hacer exactamente","En las pruebas escritas, asegurarnos de que ha comprendido el enunciado de todas las preguntas","Evaluar sus progresos en comparación con él mismo","Evitar hacerle copiar los enunciados de las preguntas o problemas en los exámenes","Evitar que el alumno tenga más de una prueba evaluable al día e intentar que estén espaciadas en el tiempo","Fragmentar el texto en pequeñas partes","Permitir que el alumno pueda tener acceso al libro de texto o al material trabajado","Permitir que el alumno pueda tener acceso al material gráfico","Presentar las preguntas del examen por escrito (no dictar)","Proporcionar mayor tiempo para entregas","Reducir el número de preguntas a contestar si son reiterativas","Reducir el número de trabajos","Tiempo adicional en las pruebas de evaluación escritas"]
+  };
+
+  /* ============================================================
+   * AUXILIARES (sin cambios)
+   * ============================================================ */
+  const generateId = () => Math.random().toString(36).substring(2, 9);
+  function showError(msg) { errorText.textContent = msg; errorMessage.classList.remove('hidden'); setTimeout(() => errorMessage.classList.add('hidden'), 5000); }
+
+  function getSubjectCode(subject, course) {
+    let code = '';
+    if ((subject.includes('Tecnología') || subject.includes('TEC')) && (course.includes('4') || course.includes('4º'))) {
+      code = 'TEC';
+    } else if (subject.includes('Computación') || subject.includes('CYR')) {
+      code = 'CYR';
+    } else if (subject.includes('Tecnología') || subject.includes('TYD') || subject.includes('Digitalización')) {
+      code = 'TYD';
+    } else {
+      code = subject.substring(0, 3).toUpperCase();
+    }
+    const courseNum = course.match(/\d+/);
+    if (courseNum) {
+      code += courseNum[0];
+    } else {
+      const subjectCourseNum = subject.match(/\d+/);
+      if (subjectCourseNum) code += subjectCourseNum[0];
+      else if (code === 'TEC') code += '4';
+    }
+    return code;
+  }
+
+  function getSubjectColorClass(code, course) {
+    if (code.startsWith('CYR')) {
+      const courseNum = course.match(/\d+/);
+      return courseNum ? `cyr-${courseNum[0]}` : 'cyr-1';
+    } else if (code.startsWith('TYD')) {
+      const courseNum = course.match(/\d+/);
+      return courseNum ? `tyd-${courseNum[0]}` : 'tyd-1';
+    } else if (code.startsWith('TEC')) {
+      return 'tec4';
+    }
+    return '';
+  }
+
+  function getFullSubjectName(subject, course) {
+    const code = getSubjectCode(subject, course);
+    if (code.startsWith('CYR')) {
+      const courseNum = course.match(/\d+/);
+      return `Computación y Robótica ${courseNum ? courseNum[0] + 'º' : ''}`;
+    } else if (code.startsWith('TYD')) {
+      const courseNum = course.match(/\d+/);
+      return `Tecnología y Digitalización ${courseNum ? courseNum[0] + 'º' : ''}`;
+    } else if (code.startsWith('TEC')) {
+      return 'Tecnología 4º';
+    }
+    return subject;
+  }
+
+  function getAccordionClass(code) {
+    if (code.startsWith('CYR')) return { header: 'accordion-header-cyr', content: 'accordion-content-cyr' };
+    if (code.startsWith('TYD')) return { header: 'accordion-header-tyd', content: 'accordion-content-tyd' };
+    if (code.startsWith('TEC')) return { header: 'accordion-header-tec4', content: 'accordion-content-tec4' };
+    return { header: '', content: '' };
+  }
+
+  function saveTextAreaState() {
+    const tareasElem = document.getElementById('tareas-text');
+    if (tareasElem) textAreaState.tareas = tareasElem.value;
+    for (const section in additionalFieldsData) {
+      const textareaId = `otros-${section.replace(/\s+/g, '-')}`;
+      const textarea = document.getElementById(textareaId);
+      if (textarea) textAreaState.otros[section] = textarea.value;
+    }
+    try { localStorage.setItem('textAreaState', JSON.stringify(textAreaState)); } catch {}
+  }
+  function restoreTextAreaState() {
+    try {
+      const saved = localStorage.getItem('textAreaState');
+      if (saved) textAreaState = JSON.parse(saved);
+    } catch {}
+    const tareasElem = document.getElementById('tareas-text');
+    if (tareasElem && textAreaState.tareas) tareasElem.value = textAreaState.tareas;
+    for (const section in textAreaState.otros) {
+      const textareaId = `otros-${section.replace(/\s+/g, '-')}`;
+      const textarea = document.getElementById(textareaId);
+      if (textarea && textAreaState.otros[section]) textarea.value = textAreaState.otros[section];
+    }
+  }
+  function setupTextAreaEvents() {
+    const tareasTextarea = document.getElementById('tareas-text');
+    if (tareasTextarea) tareasTextarea.addEventListener('input', function () { textAreaState.tareas = this.value; });
+    for (const section in additionalFieldsData) {
+      const textareaId = `otros-${section.replace(/\s+/g, '-')}`;
+      const textarea = document.getElementById(textareaId);
+      if (textarea) textarea.addEventListener('input', function () { textAreaState.otros[section] = this.value; });
+    }
+  }
+  function toggleAccordion(button) {
+    const content = button.nextElementSibling;
+    const icon = button.querySelector('i');
+    content.classList.toggle('hidden');
+    icon.classList.toggle('rotate-180');
+  }
+  function selectRecoveryCriterion(element, criterion) {
+    document.querySelectorAll('.recovery-criterion-item').forEach(i => i.classList.remove('selected'));
+    element.classList.add('selected');
+    selectedRecoveryCriterion = criterion;
+    detailCode.textContent = `Código: ${criterion.code}`;
+    detailDescription.textContent = criterion.description;
+    detailSource.textContent = `Materia de origen: ${criterion.source}`;
+    selectedCriterionDetails.classList.remove('hidden');
+  }
+
+  function checkForTech4() { return evaluations.some(e => (e.course.includes('4') || e.course.includes('4º')) && (e.subject.toLowerCase().includes('tecnología') || e.subject.toUpperCase().includes('TEC'))); }
+  function checkLowerCourses() { return evaluations.some(e => e.course.match(/[123](?:º)?/i)); }
+  function determineStudentProfile() { const hasTech4 = checkForTech4(), hasLower = checkLowerCourses(); if (hasTech4 && !hasLower) return 'profileOption2'; if (hasTech4 && hasLower) return 'profileOption3'; return 'profileOption1'; }
+  function updateWarningState() { profileWarning.classList.toggle('hidden', checkForTech4()); }
+  function getSelectedProfile() { const radios = document.querySelectorAll('input[name="studentProfile"]'); for (let r of radios) if (r.checked) return r.id; return 'profileOption1'; }
+  function getSelectedEvaluationsData() { return evaluations.filter(e => selectedEvaluationIds.includes(e.id)); }
+  function getEvaluationHash(data) { let hash = data.student.toLowerCase().trim() + "|" + data.subject.toLowerCase().trim(); data.criteria.forEach(c => { hash += `|${c.code}_${c.grade}`; }); return hash; }
+
+  function getPRAType() {
+    const profile = getSelectedProfile();
+    switch (profile) {
+      case 'profileOption1': return "PRA de PENdientes";
+      case 'profileOption2': return "PRA de REPetición";
+      case 'profileOption3': return "PRA de PENdientes y REPetición";
+      default: return "PRA";
+    }
+  }
+  function getProgramType() {
+    const profile = getSelectedProfile();
+    switch (profile) {
+      case 'profileOption1': return "Alumnado CON materias pendientes";
+      case 'profileOption2': return "Repetidor SIN materias pendientes (TEC4)";
+      case 'profileOption3': return "Repetidor CON materias pendientes";
+      default: return "No especificado";
+    }
+  }
+
+  /* ============================================================
+   * MODALES (help, validation)
+   * ============================================================ */
+  function showHelp() { document.getElementById('helpModal').classList.remove('hidden'); }
+  function closeHelp() { document.getElementById('helpModal').classList.add('hidden'); }
+  function showValidationModal(message) { document.getElementById('validationMessage').innerHTML = message; document.getElementById('validationModal').classList.remove('hidden'); }
+  function closeValidationModal() { document.getElementById('validationModal').classList.add('hidden'); }
+
+  /* ============================================================
+   * NAVEGACIÓN ENTRE PANTALLAS
+   * ============================================================ */
+  function goToScreen(screenNumber) {
+    if (currentScreen === 4) saveTextAreaState();
+    currentScreen = screenNumber;
+    [screen1, screen2, screen3, screen4].forEach(s => s.classList.add('hidden'));
+    [footerButtons1, footerButtons2, footerButtons3, footerButtons4].forEach(f => f.classList.add('hidden'));
+    const screens = {
+      1: [screen1, footerButtons1, "Paso 1: Carga y Consolidación"],
+      2: [screen2, footerButtons2, "Paso 2: Plan de Mejora"],
+      3: [screen3, footerButtons3, "Paso 3: Plan de Recuperación"],
+      4: [screen4, footerButtons4, "Paso 4: Otros Aspectos a Trabajar"]
+    };
+    if (screens[screenNumber]) {
+      const [screen, footer, title] = screens[screenNumber];
+      screen.classList.remove('hidden'); footer.classList.remove('hidden'); headerScreenTitle.textContent = title;
+      if (screenNumber === 1) {
+        const hasSelected = getSelectedEvaluationsData().length > 0;
+        nextButton.disabled = !hasSelected;
+      } else if (screenNumber === 2) {
+        if (getSelectedEvaluationsData().length === 0) { showError("Debes cargar y seleccionar al menos un informe PDF."); goToScreen(1); return; }
+        consolidatedFailedCriteria = getConsolidatedFailedCriteria(); renderScreen2();
+      } else if (screenNumber === 3) {
+        if (getSelectedEvaluationsData().length === 0) { showError("Debes cargar y seleccionar al menos un informe PDF."); goToScreen(1); return; }
+        renderScreen3();
+      } else if (screenNumber === 4) {
+        if (getSelectedEvaluationsData().length === 0) { showError("Debes cargar y seleccionar al menos un informe PDF."); goToScreen(1); return; }
+        loadAdditionalFields(); setTimeout(() => { restoreTextAreaState(); setupTextAreaEvents(); }, 100);
+      }
+    }
+    showBottomNavTemporarily();
+  }
+
+  /* ============================================================
+   * BOTTOM NAV BEHAVIOUR
+   * ============================================================ */
+  let navHideTimeout;
+  let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  function initBottomNav() {
+    if (isMobile) { bottomNav.classList.add('always-visible'); return; }
+    document.addEventListener('mousemove', (e) => {
+      if (window.innerHeight - e.clientY < 100) {
+        showBottomNav(); clearTimeout(navHideTimeout); navHideTimeout = setTimeout(hideBottomNav, 2000);
+      }
+    });
+    let lastScrollTop = 0;
+    window.addEventListener('scroll', () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      if (scrollTop > lastScrollTop) showBottomNavTemporarily();
+      lastScrollTop = scrollTop;
+    });
+    hideBottomNav();
+  }
+  function showBottomNav() { if (!isMobile) bottomNav.classList.add('visible'); }
+  function hideBottomNav() { if (!isMobile) bottomNav.classList.remove('visible'); }
+  function showBottomNavTemporarily() { if (!isMobile) { showBottomNav(); clearTimeout(navHideTimeout); navHideTimeout = setTimeout(hideBottomNav, 2000); } }
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#bottomNav')) { showBottomNav(); clearTimeout(navHideTimeout); navHideTimeout = setTimeout(hideBottomNav, 2000); }
+  });
+
+  /* ============================================================
+   * MANEJO DE ARCHIVOS Y PDF
+   * ============================================================ */
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFiles(files);
+  });
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFiles(e.target.files); });
+
+  function handleFiles(files) {
+    errorMessage.classList.add('hidden'); loadingState.classList.remove('hidden');
+    const fileArray = Array.from(files);
+    const processFilesSequentially = async () => {
+      for (const file of fileArray) { await handleFile(file); }
+      loadingState.classList.add('hidden');
+    };
+    processFilesSequentially().catch(error => {
+      console.error('Error procesando archivos:', error);
+      loadingState.classList.add('hidden');
+      showError('Error al procesar archivos: ' + error.message);
+    });
+    fileInput.value = '';
+  }
+
+  async function handleFile(file) {
+    if (file.type !== 'application/pdf') { showError(`Ignorando archivo "${file.name}": Tipo no soportado.`); return; }
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const extractedData = await processPDF(arrayBuffer);
+      if (extractedData.criteria.length === 0) { showError(`No se pudieron extraer criterios válidos del archivo "${file.name}".`); return; }
+      if (evaluations.length > 0) {
+        const firstStudent = evaluations[0].student.toLowerCase().trim(), newStudent = extractedData.student.toLowerCase().trim();
+        if (firstStudent !== newStudent) {
+          showError(`Error: Solo se permite consolidar evaluaciones del mismo alumno. La primera evaluación cargada es de "${evaluations[0].student}", y esta es de "${extractedData.student}".`);
+          return;
+        }
+      }
+      const uniqueHash = getEvaluationHash(extractedData);
+      if (evaluations.some(e => e.uniqueHash === uniqueHash)) { showError(`Advertencia: La evaluación de "${extractedData.subject}" ya ha sido cargada (archivo: ${file.name}).`); return; }
+      const newEvaluation = { id: generateId(), fileName: file.name, ...extractedData, uniqueHash };
+      evaluations.push(newEvaluation);
+      selectedEvaluationIds = [newEvaluation.id];
+      updateLoadedEvaluationsUI(); renderSelectedResults();
+    } catch (error) {
+      console.error('Error procesando archivo:', error);
+      showError(`Error al procesar "${file.name}": ${error.message || 'Error desconocido'}`);
+    }
+  }
+
+  async function processPDF(arrayBuffer) {
+    if (typeof pdfjsLib === 'undefined') throw new Error('PDF.js no se cargó correctamente');
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let allItems = [], cumulativeHeight = 0;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const viewport = page.getViewport({ scale: 1.0 });
+      textContent.items.forEach(item => {
+        if (!item.str.trim()) return;
+        const pageY = viewport.height - item.transform[5];
+        const globalY = cumulativeHeight + pageY;
+        allItems.push({ str: item.str, x: item.transform[4], pageY, globalY, w: item.width, h: item.height, page: i });
+      });
+      cumulativeHeight += viewport.height;
+    }
+    return parseData(allItems);
+  }
+
+  function parseData(allItems) {
+    allItems.sort((a, b) => { if (Math.abs(a.globalY - b.globalY) > 4) return a.globalY - b.globalY; return a.x - b.x; });
+
+    let studentName = "", subject = "", course = "Desconocido";
+    const headerItems = allItems.filter(i => i.page === 1 && i.pageY < 400);
+    let currentLineY = -1, currentLineStr = "", cleanHeaderLines = [];
+    headerItems.forEach(item => {
+      if (Math.abs(item.globalY - currentLineY) > 5) { if (currentLineStr) cleanHeaderLines.push(currentLineStr); currentLineStr = item.str; currentLineY = item.globalY; }
+      else { currentLineStr += " " + item.str; }
+    });
+    cleanHeaderLines.push(currentLineStr);
+    const headerStoppers = ["Fecha","Unidad","Año","Área"];
+    cleanHeaderLines.forEach(line => {
+      if (line.includes("Alumno/a:")) {
+        let rawValue = line.split("Alumno/a:")[1];
+        let cutIndex = rawValue.length;
+        headerStoppers.forEach(stopper => { const idx = rawValue.indexOf(stopper); if (idx !== -1 && idx < cutIndex) cutIndex = idx; });
+        studentName = rawValue.substring(0, cutIndex).replace(/[,.\-]$/, '').trim();
+      }
+      if (line.includes("Área / Materia:")) {
+        let rawValue = line.split("Área / Materia:")[1];
+        let cutIndex = rawValue.length;
+        headerStoppers.forEach(stopper => { const idx = rawValue.indexOf(stopper); if (idx !== -1 && idx < cutIndex) cutIndex = idx; });
+        subject = rawValue.substring(0, cutIndex).trim();
+      }
+      if (line.includes("Curso:")) {
+        const match = line.match(/Curso:\s*(.*?)(?=\s*(Fecha|$))/i);
+        if (match && match[1]) {
+          course = match[1].trim();
+          if (!course.toUpperCase().includes('E.S.O.')) {
+            const courseNumMatch = course.match(/\d+º/);
+            if (courseNumMatch) course = courseNumMatch[0] + " E.S.O.";
+          }
+        }
+      }
+    });
+
+    const codeRegex = /^(TYD|CYR|TEC|DIG)\s*\.\s*(\d+)\s*\.\s*(\d+)\s*\.\s*(\d+)/i;
+    const codeItems = allItems.filter(i => codeRegex.test(i.str.trim()));
+    const criteriaLeftAlignX = codeItems.length > 0 ? (() => {
+      const xValues = codeItems.map(i => i.x).sort((a, b) => a - b);
+      return xValues[Math.floor(xValues.length / 2)] - 10;
+    })() : 220;
+
+    const criteriaBlocks = [];
+    const gradeCandidates = [];
+    const gradeMinX = 480;
+    const gradeRegex = /^\s*\d{1,2}([.,]\d{1,2})?\s*$/;
+    const forbiddenPhrases = ["Fecha de generación","Pág.:","Cód.Centro","Ref.Doc.","Junta de Andalucía","Consejería","I.E.S.","INFORME DE EVALUACIÓN","Año académico","Unidad","Alumno/a:","Curso:","Fecha desde:","Fecha hasta:","Área / Materia:","COMPETENCIAS ESPECÍFICAS","VALOR","CRITERIOS DE EVALUACIÓN","CALIFICACIÓN","Criterios de Evaluación","Calificación"];
+
+    let currentBlock = null;
+    allItems.forEach(item => {
+      const txt = item.str.trim();
+      if (item.page > 1 && item.pageY < 180) return;
+      if (item.pageY < 50) return;
+      if (forbiddenPhrases.some(phrase => txt.includes(phrase))) return;
+
+      if (item.x >= gradeMinX) {
+        if (gradeRegex.test(txt)) gradeCandidates.push({ val: txt.replace(/\s/g, ''), globalY: item.globalY, used: false });
+        return;
+      }
+      if (item.x < criteriaLeftAlignX) return;
+      const match = txt.match(codeRegex);
+      if (match) {
+        if (currentBlock) currentBlock.endGlobalY = item.globalY;
+        let rawCode = match[0];
+        let cleanCode = rawCode.replace(/\s/g, '');
+        let desc = txt.substring(match.index + rawCode.length).trim().replace(/^[\s.\-–]+/, '').trim();
+        currentBlock = { code: cleanCode, courseNum: match[2], desc, startGlobalY: item.globalY, endGlobalY: null };
+        criteriaBlocks.push(currentBlock);
+      } else if (currentBlock) {
+        currentBlock.desc += " " + txt;
+      }
+    });
+    if (currentBlock) currentBlock.endGlobalY = 999999;
+    criteriaBlocks.forEach(block => {
+      const validGrade = gradeCandidates.find(g => !g.used && g.globalY >= (block.startGlobalY - 15) && g.globalY < block.endGlobalY);
+      block.grade = validGrade ? validGrade.val : "No evaluado";
+      if (validGrade) validGrade.used = true;
+    });
+    if (course === "Desconocido" && criteriaBlocks.length > 0) course = criteriaBlocks[0].courseNum + "º E.S.O.";
+
+    return {
+      student: studentName || "Desconocido",
+      subject: subject || "Desconocida",
+      course,
+      criteria: criteriaBlocks.map(c => ({ code: c.code, courseNum: c.courseNum, description: c.desc.replace(/\s+/g, ' ').trim(), grade: c.grade }))
+    };
+  }
+
+  /* ============================================================
+   * UI Y SELECCIÓN
+   * ============================================================ */
+  function toggleEvaluationSelection(id) {
+    const index = selectedEvaluationIds.indexOf(id);
+    if (index > -1) selectedEvaluationIds.splice(index, 1);
+    else selectedEvaluationIds.push(id);
+    updateLoadedEvaluationsUI(); renderSelectedResults();
+  }
+
+  function updateLoadedEvaluationsUI() {
+    evaluations.sort((a, b) => {
+      const courseA = parseInt(a.course.replace(/\D/g, '')) || 99;
+      const courseB = parseInt(b.course.replace(/\D/g, '')) || 99;
+      if (courseA !== courseB) return courseA - courseB;
+      return a.subject.localeCompare(b.subject);
+    });
+
+    evaluationsListContainer.innerHTML = '';
+    document.getElementById('evalCount').textContent = evaluations.length;
+
+    if (evaluations.length === 0) {
+      loadedEvaluationsSection.classList.add('hidden');
+      initialMessage.classList.remove('hidden');
+      resultsSection.classList.add('hidden');
+      nextButton.disabled = true;
+      return;
+    }
+
+    loadedEvaluationsSection.classList.remove('hidden');
+    initialMessage.classList.add('hidden');
+    nextButton.disabled = selectedEvaluationIds.length === 0;
+
+    evaluations.forEach(evalItem => {
+      const isSelected = selectedEvaluationIds.includes(evalItem.id);
+      const colorClass = getSubjectColorClass(getSubjectCode(evalItem.subject, evalItem.course), evalItem.course);
+      const div = document.createElement('div');
+      div.className = `evaluation-item p-3 cursor-pointer border-l-4 border-white hover:border-blue-300 transition-all ${isSelected ? 'selected' : ''} ${colorClass}`;
+      div.setAttribute('data-id', evalItem.id);
+      div.innerHTML = `
+        <div class="flex justify-between items-center group">
+          <div class="truncate pr-2 flex-grow" onclick="toggleEvaluationSelection('${evalItem.id}')">
+            <p class="font-semibold text-slate-800 truncate" title="${evalItem.subject} - ${evalItem.course}">${evalItem.subject} - ${evalItem.course}</p>
+            <p class="text-xs text-slate-500 truncate mt-1">Archivo: ${evalItem.fileName}</p>
+            <p class="text-xs text-slate-400 truncate">Alumno: ${evalItem.student}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="event.stopPropagation(); deleteEvaluation('${evalItem.id}')" class="text-slate-400 hover:text-red-600 transition-colors p-1 rounded-full hover:bg-red-50" title="Eliminar evaluación">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+            <div class="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${isSelected ? 'bg-blue-600' : 'bg-slate-200'}" onclick="toggleEvaluationSelection('${evalItem.id}')">
+              <i class="fa-solid fa-check text-xs ${isSelected ? 'text-white' : 'text-slate-600'}"></i>
+            </div>
+          </div>
+        </div>
+      `;
+      evaluationsListContainer.appendChild(div);
+    });
+  }
+
+  function filterCriteria(filterType, button) {
+    currentFilter = filterType;
+    document.querySelectorAll('.filter-button').forEach(btn => btn.classList.remove('active'));
+    if (button) button.classList.add('active');
+    renderSelectedResults();
+  }
+
+  function renderSelectedResults() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) {
+      resultsSection.classList.add('hidden');
+      initialMessage.classList.remove('hidden');
+      nextButton.disabled = true;
+      return;
+    }
+
+    initialMessage.classList.add('hidden'); resultsSection.classList.remove('hidden'); nextButton.disabled = false;
+
+    const studentName = evaluations.length > 0 ? evaluations[0].student : 'Desconocido';
+    const subjects = [...new Set(selectedData.map(e => e.subject))];
+    const courses = [...new Set(selectedData.map(e => e.course))];
+
+    document.getElementById('currentSelectionCount').textContent = `${selectedData.length} Materia${selectedData.length > 1 ? 's' : ''}`;
+    document.getElementById('resName').textContent = studentName;
+    document.getElementById('resSubject').textContent = subjects.join(', ') || 'Ninguna seleccionada';
+    document.getElementById('resCourse').textContent = courses.join(', ') || 'Desconocido';
+
+    let consolidatedCriteria = [];
+    selectedData.forEach(evalItem => {
+      const source = `${evalItem.subject}`;
+      evalItem.criteria.forEach(c => {
+        consolidatedCriteria.push({ ...c, source, student: evalItem.student, subject: evalItem.subject, course: evalItem.course });
+      });
+    });
+
+    let filteredCriteria = consolidatedCriteria;
+    switch (currentFilter) {
+      case 'approved':
+        filteredCriteria = consolidatedCriteria.filter(c => { const g = parseFloat(c.grade.replace(',', '.')); return !isNaN(g) && g >= 5; });
+        break;
+      case 'failed':
+        filteredCriteria = consolidatedCriteria.filter(c => { const g = parseFloat(c.grade.replace(',', '.')); return !isNaN(g) && g < 5; });
+        break;
+      case 'unevaluated':
+        filteredCriteria = consolidatedCriteria.filter(c => c.grade === "No evaluado");
+        break;
+    }
+
+    filteredCriteria.sort((a, b) => {
+      const getWeight = (code) => code.startsWith('CYR') ? 1 : code.startsWith('TYD') ? 2 : code.startsWith('TEC') ? 3 : 4;
+      const weightA = getWeight(a.code), weightB = getWeight(b.code);
+      if (weightA !== weightB) return weightA - weightB;
+      const courseA = parseInt(a.courseNum) || 0;
+      const courseB = parseInt(b.courseNum) || 0;
+      if (courseA !== courseB) return courseA - courseB;
+      return a.code.localeCompare(b.code);
+    });
+
+    document.getElementById('criteriaCount').textContent = getCriteriaCountText(filteredCriteria);
+    tbody.innerHTML = '';
+
+    if (filteredCriteria.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-4 text-center text-slate-500">No se encontraron criterios para esta selección y filtro.</td></tr>`;
+      return;
+    }
+
+    filteredCriteria.forEach(c => {
+      const tr = document.createElement('tr');
+      const colorClass = getSubjectColorClass(c.code, c.course);
+      tr.className = `hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0 ${colorClass}`;
+      let gradeColor = "text-slate-400", gradeDisplay = "-";
+      if (c.grade && c.grade !== "No evaluado") {
+        gradeDisplay = c.grade;
+        let gradeVal = parseFloat(c.grade.replace(',', '.'));
+        gradeColor = gradeVal < 5 ? "text-rose-600 font-bold" : "text-emerald-600 font-bold";
+      } else if (c.grade === "No evaluado") {
+        gradeDisplay = c.grade; gradeColor = "text-slate-600 font-medium";
+      }
+      tr.innerHTML = `
+        <td class="px-6 py-4 whitespace-nowrap font-mono text-sm text-blue-700 font-bold align-top">${c.code}</td>
+        <td class="px-6 py-4 text-slate-700 align-top text-sm leading-relaxed text-justify">${c.description}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-right align-top ${gradeColor} text-base">${gradeDisplay}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function getCriteriaCountText(filteredCriteria) {
+    const count = filteredCriteria.length, noun = count === 1 ? 'Criterio' : 'Criterios';
+    let filterNameDisplay;
+    switch (currentFilter) {
+      case 'approved': filterNameDisplay = count === 1 ? 'Aprobado' : 'Aprobados'; break;
+      case 'failed': filterNameDisplay = count === 1 ? 'Suspenso' : 'Suspensos'; break;
+      case 'unevaluated': filterNameDisplay = count === 1 ? 'No Evaluado' : 'No Evaluados'; break;
+      default: filterNameDisplay = 'Todos'; break;
+    }
+    return `${count} ${noun} (${filterNameDisplay})`;
+  }
+
+  /* ============================================================
+   * PANTALLA 2
+   * ============================================================ */
+  function getConsolidatedFailedCriteria() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) return new Map();
+    let allCriteria = [];
+    selectedData.forEach(evalItem => {
+      evalItem.criteria.forEach(c => {
+        allCriteria.push({ ...c, source: `${evalItem.subject} (${evalItem.course})`, id: c.code + '_' + evalItem.subject });
+      });
+    });
+    const failedCriteria = allCriteria.filter(c => {
+      const g = parseFloat(c.grade.replace(',', '.'));
+      return (c.grade === "No evaluado" || (isNaN(g) || g < 5)) && !c.code.startsWith('TEC.4');
+    });
+    const groups = new Map();
+    failedCriteria.forEach(c => { if (!groups.has(c.source)) groups.set(c.source, []); groups.get(c.source).push(c); });
+    return groups;
+  }
+
+  function renderScreen2() {
+    recoveryCriteriaListContainer.innerHTML = '';
+    selectedCriterionDetails.classList.add('hidden'); selectedRecoveryCriterion = null;
+    const defaultOptionId = determineStudentProfile();
+    document.querySelectorAll('input[name="studentProfile"]').forEach(radio => {
+      radio.onchange = null; radio.addEventListener('change', updateWarningState); radio.checked = (radio.id === defaultOptionId);
+    });
+    updateWarningState();
+    const criteriaByGroup = getConsolidatedFailedCriteria();
+    const selectedProfile = getSelectedProfile();
+
+    if (selectedProfile === 'profileOption2') {
+      noFailedCriteriaMessage.classList.remove('hidden');
+      noFailedCriteriaMessage.innerHTML = `
+        <i class="fa-solid fa-info-circle text-4xl text-blue-500 mb-3"></i>
+        <h3 class="text-lg font-bold text-blue-800">Repetidor SIN materias pendientes</h3>
+        <p class="text-blue-600 mobile-text-sm">No se mostrarán criterios de cursos anteriores. En la siguiente pantalla se definirán los criterios de TEC4 a reforzar.</p>
+      `;
+      return;
+    }
+    if (criteriaByGroup.size === 0) {
+      noFailedCriteriaMessage.classList.remove('hidden');
+      noFailedCriteriaMessage.innerHTML = `
+        <i class="fa-solid fa-trophy text-4xl text-green-500 mb-3"></i>
+        <h3 class="text-lg font-bold text-green-800">¡Todo aprobado!</h3>
+        <p class="text-green-600 mobile-text-sm">No se han encontrado criterios suspensos o no evaluados en la selección actual.</p>
+      `;
+      return;
+    }
+    noFailedCriteriaMessage.classList.add('hidden');
+
+    const sortedGroups = Array.from(criteriaByGroup.keys()).sort();
+    sortedGroups.forEach((groupName, index) => {
+      const criteriaList = criteriaByGroup.get(groupName);
+      criteriaList.sort((a, b) => a.code.localeCompare(b.code));
+      const firstCriterion = criteriaList[0];
+      const accordionClass = getAccordionClass(firstCriterion.code);
+
+      const accordionItem = document.createElement('div');
+      accordionItem.className = `border border-slate-200 rounded-xl overflow-hidden shadow-sm`;
+
+      const headerButton = document.createElement('button');
+      headerButton.className = `flex justify-between items-center w-full p-4 ${accordionClass.header} hover:bg-slate-200 transition-colors font-bold text-slate-700 text-base`;
+      headerButton.setAttribute('onclick', 'toggleAccordion(this)');
+      headerButton.innerHTML = `
+        <span class="mobile-text-sm">${groupName}
+          <span class="text-sm font-normal text-slate-500 ml-2">(${criteriaList.length} criterios)</span>
+        </span>
+        <i class="fa-solid fa-chevron-down text-sm transition-transform duration-300 ${index === 0 ? '' : 'rotate-180'}"></i>
+      `;
+
+      const contentDiv = document.createElement('div');
+      contentDiv.className = `divide-y divide-slate-100 ${index === 0 ? '' : 'hidden'} ${accordionClass.content}`;
+
+      criteriaList.forEach(c => {
+        const criterionDiv = document.createElement('div');
+        criterionDiv.className = 'recovery-criterion-item p-4 cursor-pointer hover:bg-blue-50 border-l-4 border-transparent hover:border-blue-500 transition-all';
+        criterionDiv.innerHTML = `
+          <div class="flex justify-between">
+            <span class="font-mono text-sm font-bold text-blue-700">${c.code}</span>
+            <span class="text-xs font-semibold ${c.grade === 'No evaluado' ? 'text-slate-600' : 'text-rose-600'}">${c.grade}</span>
+          </div>
+          <p class="text-xs text-slate-600 mt-1 truncate">${c.description}</p>
+        `;
+        criterionDiv.onclick = () => selectRecoveryCriterion(criterionDiv, c);
+        contentDiv.appendChild(criterionDiv);
+      });
+
+      accordionItem.appendChild(headerButton);
+      accordionItem.appendChild(contentDiv);
+      recoveryCriteriaListContainer.appendChild(accordionItem);
+    });
+  }
+
+  /* ============================================================
+   * PANTALLA 3
+   * ============================================================ */
+  function getConsolidatedFailedCriteriaList() {
+    const selectedData = getSelectedEvaluationsData();
+    let allFailedCriteria = [];
+    selectedData.forEach(evalItem => {
+      evalItem.criteria.forEach(c => {
+        const g = parseFloat(c.grade.replace(',', '.'));
+        if (c.grade === "No evaluado" || (isNaN(g) || g < 5)) {
+          allFailedCriteria.push({ ...c, subject: evalItem.subject, course: evalItem.course });
+        }
+      });
+    });
+    return allFailedCriteria;
+  }
+
+  function getRelatedTEC4Criteria(failedCriteria) {
+    const relatedTEC4 = new Set();
+    failedCriteria.forEach(criterion => {
+      const code = criterion.code;
+      if (code.startsWith('CYR')) {
+        const normalizedCode = code.replace(/^(CYR\.)\d+(\.)/, '$13$2');
+        if (cyrToTec4Mapping[normalizedCode]) cyrToTec4Mapping[normalizedCode].forEach(tec4 => relatedTEC4.add(tec4));
+      }
+      if (code.startsWith('TYD')) {
+        const normalizedCode = code.replace(/^(TYD\.)\d+(\.)/, '$13$2');
+        if (tydToTec4Mapping[normalizedCode]) tydToTec4Mapping[normalizedCode].forEach(tec4 => relatedTEC4.add(tec4));
+      }
+    });
+    return Array.from(relatedTEC4).sort();
+  }
+
+  function groupCriteriaByCourseAndSubject(failedCriteria) {
+    const grouped = {};
+    failedCriteria.forEach(criterion => {
+      const course = criterion.course, subject = criterion.subject;
+      if (!grouped[course]) grouped[course] = {};
+      if (!grouped[course][subject]) grouped[course][subject] = [];
+      grouped[course][subject].push(criterion);
+    });
+    return grouped;
+  }
+
+  function renderScreen3() {
+    const profile = getSelectedProfile();
+    const failedCriteria = getConsolidatedFailedCriteriaList();
+    let contentHTML = '';
+
+    switch (profile) {
+      case 'profileOption2':
+        const allTEC4HTML = allTEC4Criteria.map(code => `
+          <div class="criterion-node tec4">
+            <span class="font-mono font-bold">${code}</span>
+            <p class="text-sm text-slate-700 mt-1">${tec4CriteriaDescriptions[code] || 'Descripción no disponible'}</p>
+          </div>
+        `).join('');
+        contentHTML = `
+          <div class="text-center mb-6">
+            <p class="text-lg font-semibold text-slate-700 mobile-text-sm">El/la alumno/a tendrá que reforzar todos los criterios de la materia TEC4</p>
+          </div>
+          <div class="border border-slate-200 rounded-xl overflow-hidden">
+            <button class="flex justify-between items-center w-full p-4 accordion-header-tec4 hover:bg-slate-200 transition-colors font-bold text-slate-700" onclick="toggleAccordion(this)">
+              <span class="mobile-text-sm">Criterios de TEC4 a reforzar (${allTEC4Criteria.length} criterios)</span>
+              <i class="fa-solid fa-chevron-down transition-transform"></i>
+            </button>
+            <div class="accordion-content hidden p-4 accordion-content-tec4">${allTEC4HTML}</div>
+          </div>
+        `;
+        break;
+
+      case 'profileOption3':
+        const relatedTEC4 = getRelatedTEC4Criteria(failedCriteria);
+        let tec4ListHTML = relatedTEC4.length > 0 ? relatedTEC4.map(code => `
+          <div class="criterion-node tec4">
+            <span class="font-mono font-bold">${code}</span>
+            <p class="text-sm text-slate-700 mt-1">${tec4CriteriaDescriptions[code] || 'Descripción no disponible'}</p>
+          </div>
+        `).join('') : '<p class="text-slate-600 mobile-text-sm">No se encontraron criterios de TEC4 relacionados.</p>';
+        contentHTML = `
+          <div class="text-center mb-6">
+            <p class="text-lg font-semibold text-slate-700 mobile-text-sm">El/la alumno/a reforzará los siguientes criterios de TEC4, con posibles actividades adicionales.</p>
+          </div>
+          <div class="border border-slate-200 rounded-xl overflow-hidden">
+            <button class="flex justify-between items-center w-full p-4 accordion-header-tec4 hover:bg-slate-200 transition-colors font-bold text-slate-700" onclick="toggleAccordion(this)">
+              <span class="mobile-text-sm">Criterios de TEC4 a reforzar</span>
+              <i class="fa-solid fa-chevron-down transition-transform"></i>
+            </button>
+            <div class="accordion-content hidden p-4 accordion-content-tec4">${tec4ListHTML}</div>
+          </div>
+        `;
+        break;
+
+      case 'profileOption1':
+      default:
+        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
+        let accordionsHTML = '';
+        if (Object.keys(groupedCriteria).length === 0) {
+          accordionsHTML = '<p class="text-slate-600 text-center py-4 mobile-text-sm">No se encontraron criterios no superados.</p>';
+        } else {
+          Object.keys(groupedCriteria).sort().forEach(course => {
+            Object.keys(groupedCriteria[course]).sort().forEach(subject => {
+              const criteria = groupedCriteria[course][subject];
+              const firstCriterion = criteria[0];
+              const accordionClass = getAccordionClass(firstCriterion.code);
+              const criteriaHTML = criteria.map(criterion => `
+                <div class="criterion-node ${accordionClass.content.replace('accordion-content-', '')}">
+                  <span class="font-mono font-bold">${criterion.code}</span>
+                  <p class="text-sm text-slate-700 mt-1">${criterion.description}</p>
+                </div>
+              `).join('');
+              accordionsHTML += `
+                <div class="border border-slate-200 rounded-xl overflow-hidden">
+                  <button class="flex justify-between items-center w-full p-4 ${accordionClass.header} hover:bg-slate-200 transition-colors font-bold text-slate-700" onclick="toggleAccordion(this)">
+                    <span class="mobile-text-sm">${subject} - ${course}</span>
+                    <i class="fa-solid fa-chevron-down transition-transform"></i>
+                  </button>
+                  <div class="accordion-content hidden p-4 ${accordionClass.content}">${criteriaHTML}</div>
+                </div>
+              `;
+            });
+          });
+        }
+        contentHTML = `
+          <div class="text-center mb-6">
+            <p class="text-lg font-semibold text-slate-700 mobile-text-sm">El/la alumno/a realizará una secuencia de actividades para superar los criterios siguientes:</p>
+          </div>
+          <div class="space-y-4">${accordionsHTML}</div>
+        `;
+        break;
+    }
+    screen3Content.innerHTML = contentHTML;
+  }
+
+  /* ============================================================
+   * PANTALLA 4
+   * ============================================================ */
+  function loadAdditionalFields() {
+    const container = document.getElementById('additional-fields-container');
+    container.innerHTML = '';
+
+    const sectionClasses = {
+      "TIPO DE ACTIVIDADES Y TAREAS": "section-actividades",
+      "FORMAS DE ACCESO A LA INFORMACIÓN": "section-acceso",
+      "RECURSOS DIDÁCTICOS": "section-recursos",
+      "AGRUPAMIENTOS, DISTRIBUCIÓN DE ESPACIOS Y TIEMPOS": "section-agrupamientos",
+      "INSTRUMENTOS DE EVALUACIÓN": "section-evaluacion"
+    };
+    const sectionIcons = {
+      "TIPO DE ACTIVIDADES Y TAREAS": "clipboard-list",
+      "FORMAS DE ACCESO A LA INFORMACIÓN": "book-open",
+      "RECURSOS DIDÁCTICOS": "package",
+      "AGRUPAMIENTOS, DISTRIBUCIÓN DE ESPACIOS Y TIEMPOS": "users",
+      "INSTRUMENTOS DE EVALUACIÓN": "file-check"
+    };
+
+    for (const [section, items] of Object.entries(additionalFieldsData)) {
+      const sectionDiv = document.createElement('div');
+      sectionDiv.className = `additional-field-section ${sectionClasses[section]}`;
+
+      let itemsHTML = items.map(item => {
+        if (item === "Otros (especificar)" || item === "Otras (especificar)") {
+          const textareaId = `otros-${section.replace(/\s+/g, '-')}`;
+          const isChecked = selectedAdditionalFields[section] && selectedAdditionalFields[section].includes(item);
+          const showClass = isChecked ? 'show' : '';
+          return `
+            <div class="additional-field-item">
+              <input type="checkbox" id="${section}-${item.replace(/\s+/g, '-')}" value="${item}" onchange="toggleOtrosTextarea('${section}', this)" ${isChecked ? 'checked' : ''}>
+              <label for="${section}-${item.replace(/\s+/g, '-')}" class="text-sm text-slate-700 cursor-pointer flex-1 mobile-text-sm">${item}</label>
+            </div>
+            <div id="${textareaId}-container" class="otros-textarea-container ${showClass}">
+              <textarea id="${textareaId}" rows="3" class="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none mobile-text-sm" placeholder="Especifica otros aspectos...">${isChecked ? (textAreaState.otros[section] || '') : ''}</textarea>
+            </div>
+          `;
+        } else if (item === "Tareas (precisar)") {
+          const isChecked = selectedAdditionalFields[section] && selectedAdditionalFields[section].includes(item);
+          const showClass = isChecked ? 'show' : '';
+          return `
+            <div class="additional-field-item">
+              <input type="checkbox" id="${section}-${item.replace(/\s+/g, '-')}" value="${item}" onchange="toggleTareasTextarea(this)" ${isChecked ? 'checked' : ''}>
+              <label for="${section}-${item.replace(/\s+/g, '-')}" class="text-sm text-slate-700 cursor-pointer flex-1 mobile-text-sm">${item}</label>
+            </div>
+            <div id="tareas-textarea-container" class="tareas-textarea-container ${showClass}">
+              <textarea id="tareas-text" rows="3" class="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none mobile-text-sm" placeholder="Describe las tareas específicas...">${isChecked ? (textAreaState.tareas || '') : ''}</textarea>
+            </div>
+          `;
+        } else {
+          const isChecked = selectedAdditionalFields[section] && selectedAdditionalFields[section].includes(item);
+          return `
+            <div class="additional-field-item">
+              <input type="checkbox" id="${section}-${item.replace(/\s+/g, '-')}" value="${item}" onchange="updateAdditionalField('${section}', this)" ${isChecked ? 'checked' : ''}>
+              <label for="${section}-${item.replace(/\s+/g, '-')}" class="text-sm text-slate-700 cursor-pointer flex-1 mobile-text-sm">${item}</label>
+            </div>
+          `;
+        }
+      }).join('');
+
+      sectionDiv.innerHTML = `
+        <h3 class="font-semibold mb-3 flex items-center gap-2 mobile-text-sm">
+          <i class="fa-solid fa-${sectionIcons[section]}"></i>${section}
+        </h3>
+        <div class="space-y-2">${itemsHTML}</div>
+      `;
+      container.appendChild(sectionDiv);
+    }
+    setTimeout(() => setupTextAreaEvents(), 100);
+  }
+
+  function toggleTareasTextarea(checkbox) {
+    const textareaContainer = document.getElementById('tareas-textarea-container');
+    const textarea = document.getElementById('tareas-text');
+    if (checkbox.checked) { textareaContainer.classList.add('show'); if (textAreaState.tareas) textarea.value = textAreaState.tareas; }
+    else { textareaContainer.classList.remove('show'); textarea.value = ''; textAreaState.tareas = ''; }
+    updateAdditionalField('TIPO DE ACTIVIDADES Y TAREAS', checkbox);
+  }
+  function toggleOtrosTextarea(section, checkbox) {
+    const textareaId = `otros-${section.replace(/\s+/g, '-')}`;
+    const textareaContainer = document.getElementById(`${textareaId}-container`);
+    const textarea = document.getElementById(textareaId);
+    if (checkbox.checked) { textareaContainer.classList.add('show'); if (textAreaState.otros[section]) textarea.value = textAreaState.otros[section]; }
+    else { textareaContainer.classList.remove('show'); textarea.value = ''; delete textAreaState.otros[section]; }
+    updateAdditionalField(section, checkbox);
+  }
+  function updateAdditionalField(section, checkbox) {
+    if (!selectedAdditionalFields[section]) selectedAdditionalFields[section] = [];
+    if (checkbox.checked) selectedAdditionalFields[section].push(checkbox.value);
+    else selectedAdditionalFields[section] = selectedAdditionalFields[section].filter(item => item !== checkbox.value);
+  }
+
+  /* ============================================================
+   * DETECCIÓN AUTOMÁTICA REPETIDOR
+   * ============================================================ */
+  function isRepeater() { const hasTech4 = checkForTech4(); const hasLowerCourses = checkLowerCourses(); return hasTech4 && hasLowerCourses; }
+
+  /* ============================================================
+   * VALIDACIÓN
+   * ============================================================ */
+  function validateAdditionalFields() {
+    const requiredSections = [
+      "TIPO DE ACTIVIDADES Y TAREAS",
+      "FORMAS DE ACCESO A LA INFORMACIÓN",
+      "RECURSOS DIDÁCTICOS",
+      "AGRUPAMIENTOS, DISTRIBUCIÓN DE ESPACIOS Y TIEMPOS",
+      "INSTRUMENTOS DE EVALUACIÓN"
+    ];
+    const emptySections = [];
+    for (const section of requiredSections) {
+      if (!selectedAdditionalFields[section] || selectedAdditionalFields[section].length === 0) emptySections.push(section);
+    }
+    if (emptySections.length === 0) return true;
+    let msg = "";
+    if (emptySections.length === 1) {
+      msg = `Se han marcado 0 ítems en <strong>${emptySections[0]}</strong>. Seleccione al menos un check en la misma.`;
+    } else {
+      msg = "Se han marcado 0 ítems en las siguientes subsecciones:<br>" +
+        emptySections.map(s => `• <strong>${s}</strong>`).join('<br>') +
+        "<br><br>Marque al menos un ítem en cada una de ellas";
+    }
+    showValidationModal(msg);
+    return false;
+  }
+
+  /* ============================================================
+   * GENERACIÓN DE PRA — PDF + FIREBASE
+   * ------------------------------------------------------------
+   * Cambios clave:
+   *   1) sanitizeFilename() reemplaza al regex /[^a-z0-9]/gi
+   *      → respeta tildes y ñ en el nombre del fichero.
+   *   2) Valida que se hayan indicado grupo y tutor/a.
+   *   3) Incluye grupo y tutor/a en el PDF.
+   *   4) Tras generar el PDF, guarda el PRA en Firebase bajo
+   *      /courses/{yearId}/pras/{praId} (aislamiento por curso).
+   * ============================================================ */
+  function generatePRA() {
+    if (currentUser && currentUser.role !== 'admin') {
+      alert('Solo los administradores pueden generar PRAs.');
+      return;
+    }
+    if (!validateAdditionalFields()) return;
+
+    // Validar grupo y tutor/a
+    const groupInput = document.getElementById('studentGroup');
+    const tutorInput = document.getElementById('studentTutor');
+    const group = groupInput ? groupInput.value.trim() : '';
+    const tutor = tutorInput ? tutorInput.value.trim() : '';
+    if (!group || !tutor) {
+      showValidationModal('Debes indicar el <strong>Grupo</strong> y el/la <strong>Tutor/a</strong> del alumno en la pantalla 1 (datos del alumno) antes de generar el PRA.');
+      goToScreen(1);
+      return;
+    }
+
+    try {
+      saveTextAreaState();
+      if (typeof jspdf === 'undefined') { alert('Error: La librería para generar PDF no está cargada correctamente. Recarga la página e intenta nuevamente.'); return; }
+      const { jsPDF } = jspdf, doc = new jsPDF(),
+            studentName = evaluations.length > 0 ? evaluations[0].student : "Desconocido",
+            profile = getSelectedProfile(),
+            failedCriteria = getConsolidatedFailedCriteriaList(),
+            selectedData = getSelectedEvaluationsData(),
+            subjectCodes = selectedData.map(e => getSubjectCode(e.subject, e.course));
+
+      let codes = [...new Set(subjectCodes)];
+      if (isRepeater()) {
+        codes = codes.map(code => (code === 'TYD4' || code === 'CYR4') ? 'REP' : code);
+        if (!codes.includes('REP')) codes.push('REP');
+      }
+
+      // FIX TILDES: sanitizeFilename respetando á, é, í, ó, ú, ñ
+      const studentSafe = sanitizeFilename(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
+      let fileName = `PRA`;
+      const subjectPart = codes.join('_');
+      if (subjectPart) fileName += `_${subjectPart}`;
+      fileName += `_${studentSafe}.pdf`;
+      fileName = fileName.replace(/_+/g, '_');
+
+      // PDF header
+      doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont("helvetica", "bold");
+      doc.text("PROGRAMA DE REFUERZO DEL APRENDIZAJE", 105, 13, { align: "center" });
+      doc.setTextColor(0, 0, 0); doc.setFontSize(11); doc.setFont("helvetica", "normal");
+
+      let y = 35, pageHeight = 280, margin = 14, maxWidth = 180, lineHeight = 7;
+      function checkPageBreak(h) { if (y + h > pageHeight) { doc.addPage(); y = 20; return true; } return false; }
+      function addText(text, isBold = false, customY = null, customMaxWidth = maxWidth) {
+        const currentY = customY !== null ? customY : y;
+        doc.setFont("helvetica", isBold ? "bold" : "normal");
+        const safeText = text ? String(text) : '', lines = doc.splitTextToSize(safeText, customMaxWidth), textHeight = lines.length * lineHeight;
+        if (currentY + textHeight > pageHeight) { doc.addPage(); y = 20; addText(text, isBold, y, customMaxWidth); return y + textHeight + 5; }
+        doc.text(lines, margin, currentY);
+        return currentY + textHeight + 5;
+      }
+      function addSection(title, content) {
+        checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(title, margin, y);
+        doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1);
+        y += 10; y = addText(content || '', false, y); return y;
+      }
+
+      const praType = getPRAType();
+      const programType = getProgramType();
+      const subjectsWithCourse = selectedData.map(e => `${e.subject} (${e.course})`);
+      const uniqueSubjectsWithCourse = [...new Set(subjectsWithCourse)];
+      const yearId = getCurrentAcademicYear();
+
+      // Datos del alumno (incluye grupo y tutor/a + curso académico)
+      y = addSection(
+        "DATOS DEL ALUMNO/A",
+        `Nombre: ${studentName}\nGrupo: ${group}\nTutor/a: ${tutor}\nTipo de programa: ${programType}\nMaterias: ${uniqueSubjectsWithCourse.join(', ')}\nCurso académico: ${yearId}`
+      );
+      y = addSection("TIPO DE PRA", `${praType}`);
+
+      if (profile === 'profileOption1' || profile === 'profileOption3') {
+        let criteriaText = "";
+        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
+        Object.keys(groupedCriteria).sort().forEach(course => {
+          Object.keys(groupedCriteria[course]).sort().forEach(subject => {
+            if (profile === 'profileOption3' && course.includes('4')) return;
+            const criteria = groupedCriteria[course][subject];
+            const subjectCode = getSubjectCode(subject, course);
+            const fullSubjectName = getFullSubjectName(subject, course);
+            criteriaText += `${fullSubjectName} (${subjectCode}): ${criteria.map(c => c.code).join(", ")}\n\n`;
+          });
+        });
+        if (criteriaText) {
+          checkPageBreak(20); doc.setFont("helvetica", "bold"); doc.text("CRITERIOS A SUPERAR", margin, y);
+          doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1); y += 8; doc.setFont("helvetica", "normal");
+          const lines = criteriaText.split('\n');
+          lines.forEach(line => { if (line.trim()) { y = addText(line, false, y); y += 2; } });
+        }
+      }
+
+      checkPageBreak(20); doc.setFillColor(220, 252, 231); doc.rect(margin, y-5, 182, 10, 'F');
+      doc.setTextColor(21, 128, 61); doc.setFont("helvetica", "bold"); doc.text("PROPUESTA DE REFUERZO", 105, y+1, { align: "center" });
+      y += 15; doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "normal");
+
+      if (profile === 'profileOption2') {
+        let texto = "El alumno/a cursa TEC4 y repite curso. Se trabajarán todos los criterios de Tecnología 4º.\n\nSe podrán proponer actividades adicionales que desarrollen los criterios:";
+        y = addText(texto);
+        allTEC4Criteria.forEach(id => {
+          checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
+          doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
+          const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
+          if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
+          doc.text(descLines, 35, y); y += descHeight + 4;
+        });
+      } else if (profile === 'profileOption3') {
+        const relatedTEC4 = getRelatedTEC4Criteria(failedCriteria);
+        let texto = "Criterios de Tecnología 4º a reforzar en base a las materias del departamento no superadas.\n\nSe podrán proponer actividades adicionales a lo largo del curso:";
+        y = addText(texto);
+        if (relatedTEC4.length === 0) { y = addText("No se han detectado criterios específicos correlacionados."); }
+        else {
+          relatedTEC4.forEach(id => {
+            checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
+            doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
+            const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
+            if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
+            doc.text(descLines, 35, y); y += descHeight + 4;
+          });
+        }
+      } else {
+        let texto = "El/la alumno/a deberá realizar actividades para superar los criterios no superados del Departamento.\n\nLa entrega se realizará en Classroom del Departamento.\n\nSe proporcionará una evaluación pormenorizada por criterio.";
+        y = addText(texto);
+        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
+        Object.keys(groupedCriteria).sort().forEach(course => {
+          Object.keys(groupedCriteria[course]).sort().forEach(subject => {
+            checkPageBreak(15);
+            const subjectCode = getSubjectCode(subject, course);
+            const fullSubjectName = getFullSubjectName(subject, course);
+            doc.setFont("helvetica", "bold"); doc.text(`${fullSubjectName} (${subjectCode})`, margin, y); y += 7;
+            const criteria = groupedCriteria[course][subject], codesList = criteria.map(c => c.code).join(", ");
+            checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 180 }); y += lineHeight * 2; y += 5;
+          });
+        });
+      }
+
+      if (Object.keys(selectedAdditionalFields).length > 0) {
+        checkPageBreak(20); y += 10;
+        doc.setFillColor(240, 249, 255); doc.rect(margin, y-5, 182, 10, 'F');
+        doc.setTextColor(37, 99, 235); doc.setFont("helvetica", "bold");
+        doc.text("OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA", 105, y+1, { align: "center" });
+        y += 15; doc.setTextColor(0, 0, 0);
+
+        for (const [section, items] of Object.entries(selectedAdditionalFields)) {
+          checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(section, margin, y); y += 7;
+          if (items.length === 0) { doc.setFont("helvetica", "italic"); y = addText("No se han seleccionado elementos específicos.", false, y); }
+          else {
+            doc.setFont("helvetica", "normal");
+
+            if (section === "TIPO DE ACTIVIDADES Y TAREAS") {
+              if (items.includes("Tareas (precisar)") && textAreaState.tareas) {
+                checkPageBreak(10); doc.text("Tareas específicas:", margin, y); y += lineHeight;
+                const lines = textAreaState.tareas.split('\n').filter(l => l.trim());
+                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                y += 5;
+              }
+              let normal = false;
+              items.forEach(item => {
+                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
+                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                }
+              });
+              if (normal) y += 5;
+              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
+                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
+                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
+                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                y += 5;
+              }
+            } else {
+              let normal = false;
+              items.forEach(item => {
+                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
+                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                }
+              });
+              if (normal) y += 5;
+              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
+                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
+                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
+                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                y += 5;
+              }
+            }
+          }
+          doc.setDrawColor(200, 200, 200); doc.line(margin, y, 196, y); y += 10;
+        }
+      }
+
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
+        doc.text("Generado automáticamente por ISUStoPRA - Dpto. Tecnología", 105, 290, { align: "center" });
+        doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
+      }
+
+      // Guardar PRA en Firebase (aislado por curso académico)
+      const praData = {
+        studentName: studentName,
+        group: group,
+        tutor: tutor,
+        profile: profile,
+        praType: praType,
+        programType: programType,
+        subjects: uniqueSubjectsWithCourse,
+        evaluations: getSelectedEvaluationsData().map(e => ({
+          fileName: e.fileName,
+          student: e.student,
+          subject: e.subject,
+          course: e.course,
+          criteria: e.criteria,
+          uniqueHash: e.uniqueHash
+        })),
+        selectedAdditionalFields: selectedAdditionalFields,
+        textAreaState: textAreaState,
+        failedCriteria: failedCriteria,
+        fileName: fileName
+      };
+      savePRAToFirebase(praData).then(({ yearId: yid, praId } = {}) => {
+        console.log('PRA guardado en Firebase:', yid, praId);
+      }).catch(err => {
+        console.error('Error guardando PRA en Firebase (el PDF ya se ha descargado):', err);
+        alert('El PDF se ha descargado, pero NO se pudo guardar en Firebase:\n' + err.message);
+      });
+
+      doc.save(fileName);
+    } catch (error) {
+      console.error('Error al generar PRA:', error);
+      alert('Error al generar el PDF: ' + error.message);
+    }
+  }
+
+  /* ============================================================
+   * REGENERAR PDF DESDE UN PRA GUARDADO
+   * (para usuarios de solo lectura)
+   * ============================================================ */
+  function regeneratePRAPdf(data) {
+    try {
+      if (typeof jspdf === 'undefined') { alert('jsPDF no disponible.'); return; }
+      const { jsPDF } = jspdf, doc = new jsPDF();
+      const studentName = data.studentName || 'Desconocido';
+      const group = data.group || '—';
+      const tutor = data.tutor || '—';
+      const profile = data.profile || 'profileOption1';
+      const failedCriteria = data.failedCriteria || [];
+      const selectedAdditionalFields = data.selectedAdditionalFields || {};
+      const textAreaState = data.textAreaState || { tareas: '', otros: {} };
+      const yearId = data.academicYear || getCurrentAcademicYear();
+
+      doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont("helvetica", "bold");
+      doc.text("PROGRAMA DE REFUERZO DEL APRENDIZAJE", 105, 13, { align: "center" });
+      doc.setTextColor(0, 0, 0); doc.setFontSize(11); doc.setFont("helvetica", "normal");
+
+      let y = 35, pageHeight = 280, margin = 14, maxWidth = 180, lineHeight = 7;
+      function checkPageBreak(h) { if (y + h > pageHeight) { doc.addPage(); y = 20; return true; } return false; }
+      function addText(text, isBold = false, customY = null, customMaxWidth = maxWidth) {
+        const currentY = customY !== null ? customY : y;
+        doc.setFont("helvetica", isBold ? "bold" : "normal");
+        const safeText = text ? String(text) : '', lines = doc.splitTextToSize(safeText, customMaxWidth), textHeight = lines.length * lineHeight;
+        if (currentY + textHeight > pageHeight) { doc.addPage(); y = 20; addText(text, isBold, y, customMaxWidth); return y + textHeight + 5; }
+        doc.text(lines, margin, currentY);
+        return currentY + textHeight + 5;
+      }
+      function addSection(title, content) {
+        checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(title, margin, y);
+        doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1);
+        y += 10; y = addText(content || '', false, y); return y;
+      }
+
+      y = addSection("DATOS DEL ALUMNO/A",
+        `Nombre: ${studentName}\nGrupo: ${group}\nTutor/a: ${tutor}\nTipo de programa: ${data.programType || '—'}\nMaterias: ${(data.subjects || []).join(', ')}\nCurso académico: ${yearId}`);
+      y = addSection("TIPO DE PRA", data.praType || 'PRA');
+
+      if (profile === 'profileOption1' || profile === 'profileOption3') {
+        const grouped = groupCriteriaByCourseAndSubject(failedCriteria);
+        let criteriaText = "";
+        Object.keys(grouped).sort().forEach(course => {
+          Object.keys(grouped[course]).sort().forEach(subject => {
+            if (profile === 'profileOption3' && course.includes('4')) return;
+            const criteria = grouped[course][subject];
+            const subjectCode = getSubjectCode(subject, course);
+            const fullSubjectName = getFullSubjectName(subject, course);
+            criteriaText += `${fullSubjectName} (${subjectCode}): ${criteria.map(c => c.code).join(", ")}\n\n`;
+          });
+        });
+        if (criteriaText) {
+          checkPageBreak(20); doc.setFont("helvetica", "bold"); doc.text("CRITERIOS A SUPERAR", margin, y);
+          doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1); y += 8; doc.setFont("helvetica", "normal");
+          criteriaText.split('\n').forEach(line => { if (line.trim()) { y = addText(line, false, y); y += 2; } });
+        }
+      }
+
+      const studentSafe = sanitizeFilename(studentName);
+      const outName = `PRA_${studentSafe}_${yearId}.pdf`.replace(/_+/g, '_');
+      doc.save(outName);
+    } catch (e) {
+      console.error('Error regenerando PDF:', e);
+      alert('Error al regenerar PDF: ' + e.message);
+    }
+  }
+
+  /* ============================================================
+   * LIMPIEZA DE TEXTAREAS Y CHECKS EN PANTALLA 4
+   * ============================================================ */
+  function clearAdditionalTextAreas() {
+    const tareasContainer = document.getElementById('tareas-textarea-container');
+    const tareasText = document.getElementById('tareas-text');
+    if (tareasText) tareasText.value = '';
+    if (tareasContainer) tareasContainer.classList.remove('show');
+
+    const otrosTextareas = additionalFieldsContainer
+      ? additionalFieldsContainer.querySelectorAll('textarea[id^="otros-"]')
+      : [];
+    otrosTextareas.forEach(tx => {
+      tx.value = '';
+      const parentContainer = document.getElementById(`${tx.id}-container`);
+      if (parentContainer) parentContainer.classList.remove('show');
+    });
+
+    const checkboxes = additionalFieldsContainer
+      ? additionalFieldsContainer.querySelectorAll('input[type="checkbox"]')
+      : [];
+    checkboxes.forEach(cb => { cb.checked = false; });
+
+    // Limpiar también grupo y tutor
+    const g = document.getElementById('studentGroup');
+    const t = document.getElementById('studentTutor');
+    if (g) g.value = '';
+    if (t) t.value = '';
+  }
+
+  function resetApp() {
+    if (!confirm("¿Estás seguro de que quieres reiniciar todos los datos y comenzar con un nuevo alumno?")) return;
+
+    evaluations = [];
+    selectedEvaluationIds = [];
+    currentFilter = 'all';
+    consolidatedFailedCriteria = [];
+    selectedAdditionalFields = {};
+    textAreaState = { tareas: '', otros: {} };
+    localStorage.removeItem('textAreaState');
+
+    clearAdditionalTextAreas();
+    if (additionalFieldsContainer) additionalFieldsContainer.innerHTML = '';
+
+    updateLoadedEvaluationsUI();
+    initialMessage.classList.remove('hidden');
+    resultsSection.classList.add('hidden');
+    nextButton.disabled = true;
+
+    goToScreen(1);
+  }
+
+  function deleteEvaluation(id) {
+    evaluations = evaluations.filter(e => e.id !== id);
+    selectedEvaluationIds = selectedEvaluationIds.filter(sid => sid !== id);
+    updateLoadedEvaluationsUI(); renderSelectedResults();
+    if (evaluations.length === 0) clearAllData();
+  }
+
+  function clearAllData() {
+    evaluations = [];
+    selectedEvaluationIds = [];
+    currentFilter = 'all';
+    consolidatedFailedCriteria = [];
+    selectedAdditionalFields = {};
+    textAreaState = { tareas: '', otros: {} };
+    localStorage.removeItem('textAreaState');
+
+    clearAdditionalTextAreas();
+    if (additionalFieldsContainer) additionalFieldsContainer.innerHTML = '';
+
+    updateLoadedEvaluationsUI();
+    initialMessage.classList.remove('hidden');
+    resultsSection.classList.add('hidden');
+    nextButton.disabled = true;
+  }
+
+  /* ============================================================
+   * EXPORT HELPERS (FIX TILDES aplicado)
+   * ============================================================ */
+  function getFilterName() {
+    switch (currentFilter) {
+      case 'approved': return 'Aprobados';
+      case 'failed': return 'Suspensos';
+      case 'unevaluated': return 'NoEvaluados';
+      default: return 'Todos';
+    }
+  }
+
+  function getFileName(ext) {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) return `sin_datos.${ext}`;
+    // FIX TILDES: sanitizeFilename en vez de /[^a-z0-9]/gi
+    const student = sanitizeFilename(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
+    const subjectCodes = selectedData.map(e => getSubjectCode(e.subject, e.course));
+    let uniqueSubjectCodes = [...new Set(subjectCodes)];
+    if (isRepeater()) {
+      uniqueSubjectCodes = uniqueSubjectCodes.map(code => (code === 'TYD4' || code === 'CYR4') ? 'REP' : code);
+      if (!uniqueSubjectCodes.includes('REP')) uniqueSubjectCodes.push('REP');
+    }
+    uniqueSubjectCodes = uniqueSubjectCodes.filter(code => code && code.trim() !== '');
+    const subjectPart = uniqueSubjectCodes.join('_');
+    const filterNameWithPrefix = `CCEE_${getFilterName()}`;
+    let fileName = `${student}`;
+    if (subjectPart) fileName += `_${subjectPart}`;
+    fileName += `_${filterNameWithPrefix}.${ext}`;
+    return fileName.replace(/_+/g, '_');
+  }
+
+  function getFilteredCriteriaForExport() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) return [];
+    let consolidated = [];
+    selectedData.forEach(evalItem => {
+      evalItem.criteria.forEach(c => consolidated.push({ ...c, student: evalItem.student, subject: evalItem.subject, course: evalItem.course }));
+    });
+    let filtered = [];
+    switch (currentFilter) {
+      case 'approved':
+        filtered = consolidated.filter(c => { const g = parseFloat(c.grade.replace(',', '.')); return !isNaN(g) && g >= 5; });
+        break;
+      case 'failed':
+        filtered = consolidated.filter(c => { const g = parseFloat(c.grade.replace(',', '.')); return !isNaN(g) && g < 5; });
+        break;
+      case 'unevaluated':
+        filtered = consolidated.filter(c => c.grade === "No evaluado");
+        break;
+      default: filtered = consolidated; break;
+    }
+    filtered.sort((a, b) => a.code.localeCompare(b.code));
+    return filtered;
+  }
+
+  function exportJSON() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) { showError('No hay evaluaciones seleccionadas para exportar.'); return; }
+    const criteria = getFilteredCriteriaForExport();
+    const data = {
+      metadata: {
+        alumno: evaluations.length > 0 ? evaluations[0].student : 'Desconocido',
+        materias: [...new Set(selectedData.map(e => e.subject))],
+        cursos: [...new Set(selectedData.map(e => e.course))],
+        archivos_origen: selectedData.map(e => e.fileName),
+        filtro_aplicado: getFilterName(),
+        curso_academico: getCurrentAcademicYear()
+      },
+      criteria: criteria.map(c => ({ materia: c.subject, codigo: c.code, descripcion: c.description, calificacion: c.grade }))
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = getFileName('json'); document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  function exportCSV() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) { showError('No hay evaluaciones seleccionadas para exportar.'); return; }
+    const criteria = getFilteredCriteriaForExport();
+    const filterName = getFilterName();
+    let csv = "Materia;Código;Descripción;Calificación;Alumno;Curso;Filtro_Aplicado\n";
+    const esc = (text) => text ? '"' + String(text).replace(/"/g, '""') + '"' : "";
+    criteria.forEach(c => {
+      const row = [esc(c.subject), esc(c.code), esc(c.description), esc(c.grade), esc(c.student), esc(c.course), esc(filterName)];
+      csv += row.join(";") + "\n";
+    });
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = getFileName('csv'); document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  /* ============================================================
+   * CHIP DINÁMICO DE VERSIÓN (desde el service worker)
+   * ============================================================ */
+  function normalizeVersion(raw) {
+    let v = raw ? String(raw).replace(/^isustopra[-_]?/i, '').trim() : '';
+    if (!v) v = 'dev';
+    if (!/^v/i.test(v)) v = 'v' + v;
+    return v;
+  }
+
+  function getVersionFromSW() {
+    return new Promise((resolve) => {
+      if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+        resolve(null); return;
+      }
+      let done = false;
+      const cleanup = (val) => {
+        if (done) return;
+        done = true;
+        navigator.serviceWorker.removeEventListener('message', handler);
+        resolve(val);
+      };
+      const handler = (event) => {
+        const d = event.data || {};
+        if (d.type === 'SW_VERSION' && d.version) cleanup(d.version);
+      };
+      navigator.serviceWorker.addEventListener('message', handler);
+      try {
+        navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' });
+      } catch (e) { cleanup(null); return; }
+      setTimeout(() => cleanup(null), 800);
+    });
+  }
+
+  async function getVersionFromFile() {
+    const candidates = ['./sw.js'];
+    for (const path of candidates) {
+      for (const useBust of [true, false]) {
+        try {
+          const url = useBust ? path + (path.includes('?') ? '&' : '?') + '_=' + Date.now() : path;
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) continue;
+          const src = await res.text();
+          // El SW usa: const APP_VERSION = 'vX.Y.Z-...';
+          const m = src.match(/APP_VERSION\s*=\s*['"`]([^'"`]+)['"`]/);
+          if (m && m[1]) return m[1];
+          // Compat: CACHE_NAME = 'isustopra-...'
+          const m2 = src.match(/CACHE_NAME\s*=\s*['"`]([^'"`]+)['"`]/);
+          if (m2 && m2[1]) return m2[1];
+        } catch (err) { /* ignore */ }
+      }
+    }
+    return null;
+  }
+
+  async function loadAppVersion() {
+    const chip = document.getElementById('appVersionChip');
+    const textEl = document.getElementById('appVersionText');
+    if (!chip || !textEl) return;
+    let raw = await getVersionFromSW();
+    if (!raw) raw = await getVersionFromFile();
+    const version = normalizeVersion(raw);
+    textEl.textContent = version;
+    chip.title = `Versión de la aplicación: ${version}`;
+    chip.classList.remove('hidden');
+    document.documentElement.setAttribute('data-app-version', version);
+  }
+
+  /* ============================================================
+   * INICIALIZACIÓN
+   * ============================================================ */
+  window.addEventListener('load', function () {
+    if (typeof pdfjsLib === 'undefined') { console.error('PDF.js no se cargó'); showError('Error: La librería PDF.js no se cargó correctamente. Recarga la página.'); }
+    if (typeof jspdf === 'undefined') { console.error('jsPDF no se cargó'); showError('Error: La librería jsPDF no se cargó correctamente. Recarga la página.'); }
+    initBottomNav();
+    loadAppVersion();
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    textAreaState = { tareas: '', otros: {} }; selectedAdditionalFields = {}; localStorage.removeItem('textAreaState');
+    goToScreen(1); updateLoadedEvaluationsUI();
+    const allButton = document.getElementById('filterAll');
+    if (allButton) allButton.classList.add('active');
+    loadAppVersion();
+  });
+
+  // Escucha mensajes del SW para refrescar la versión
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const d = event.data || {};
+      if (d.type === 'SW_VERSION' && d.version) {
+        const v = normalizeVersion(d.version);
+        const textEl = document.getElementById('appVersionText');
+        const chip = document.getElementById('appVersionChip');
+        if (textEl && chip) {
+          textEl.textContent = v;
+          chip.title = `Versión de la aplicación: ${v}`;
+          chip.classList.remove('hidden');
+          document.documentElement.setAttribute('data-app-version', v);
+        }
+      } else if (d.type === 'SW_ACTIVATED' && d.version) {
+        loadAppVersion();
+      }
+    });
+  }
+  </script>
+
+  <!-- ============================================================
+       SERVICE WORKER REGISTRATION
+       ============================================================ -->
+  <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // ============================================================
+      // GUARDA DE AISLAMIENTO CONTRA EL PORTAL tecdea.github.io
+      // ------------------------------------------------------------
+      // Solo registramos el SW si:
+      //   1) Está en un subdirectorio (NO en la raíz del dominio).
+      //      Si estuviera en la raíz, su scope sería todo el origen
+      //      y pisaría el SW del portal tecdea.github.io.
+      //   2) La página actual está dentro de ese subdirectorio.
+      // Esto evita que un despliegue incorrecto (p. ej. copiar
+      // index.html a la raíz del portal) convierta el SW de
+      // ISUStoPRA en el SW de todo el dominio.
+      // ============================================================
+      const here = location.pathname; // p. ej. /isustoprav2/index.html
+      const swUrl = new URL('./sw.js', location.href).pathname; // p. ej. /isustoprav2/sw.js
+      const swDir = (swUrl.replace(/\/[^/]*$/, '') || '/'); // p. ej. /isustoprav2
+      if (swDir === '/') {
+        console.warn('[ISUStoPRA] No se registra el SW: está en la raíz del dominio. Interferiría con el portal.');
+        loadAppVersion();
+        return;
+      }
+      const inScope = here === swDir || here.startsWith(swDir + '/');
+      if (!inScope) {
+        console.warn('[ISUStoPRA] No se registra el SW: la página no está bajo su directorio (',
+          swDir, 'vs', here, ').');
+        loadAppVersion();
+        return;
+      }
+
+      // Scope EXPLÍCITO './' → el SW solo controla este subdirectorio.
+      navigator.serviceWorker.register('./sw.js', { scope: './' })
+        .then(reg => {
+          console.log('SW registrado (scope=' + reg.scope + ')');
+          reg.addEventListener('updatefound', () => {
+            const newSW = reg.installing;
+            if (!newSW) return;
+            newSW.addEventListener('statechange', () => {
+              if (newSW.state === 'activated') loadAppVersion();
+            });
+          });
+          navigator.serviceWorker.ready.then(() => loadAppVersion()).catch(() => {});
+        })
+        .catch(err => console.error('Error SW', err));
+    });
+  }
+  </script>
+
+</body>
+</html>
+
+
