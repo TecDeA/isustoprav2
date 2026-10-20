@@ -3920,15 +3920,37 @@
         const action = isEditing ? 'actualizado' : 'guardado';
         console.log(`PRA ${action} en Firebase:`, yid, praId);
         if (downloadPdf && pdfDownloaded) {
-          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nPDF descargado.`);
+          // PDF descargado OK
         } else if (downloadPdf && !pdfDownloaded) {
           alert(`PRA ${action} en la nube (${yid}), pero hubo un error al descargar el PDF. Revisa la consola.`);
-        } else {
-          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nNo se ha descargado el PDF (modo "solo guardado").`);
+          return;
         }
-        // Limpiar el flag de edición tras guardar
+
+        // Tras guardar, limpiar el flag de edición SIEMPRE para que
+        // el siguiente "Guardar" no intente actualizar un PRA que
+        // ya no está en modo edición.
         editingPraRef = null;
         updateEditingBanner();
+
+        // Preguntar al usuario qué quiere hacer ahora para evitar
+        // duplicados por accidente (Bug: si el usuario pulsa "Guardar"
+        // otra vez sin pulsar "Nuevo alumno", crearía un duplicado).
+        const msg = downloadPdf
+          ? `PRA ${action} correctamente en la nube (${yid}) y PDF descargado.\n\n¿Quieres empezar con un nuevo alumno ahora?`
+          : `PRA ${action} correctamente en la nube (${yid}).\n\n¿Quieres empezar con un nuevo alumno ahora?`;
+        if (confirm(msg)) {
+          resetApp();
+        } else {
+          // El usuario decide seguir con los datos en pantalla.
+          // Si vuelve a pulsar "Guardar", se creará un PRA NUEVO
+          // (no actualizará el anterior, porque editingPraRef ya es null).
+          // Le avisamos de esto.
+          if (downloadPdf) {
+            // Si descargó PDF, no hace falta otro alert (ya sabe que terminó)
+          } else {
+            console.info('[savePRA] Datos del PRA siguen en pantalla. El próximo "Guardar" creará un PRA nuevo.');
+          }
+        }
       }).catch(err => {
         console.error('Error guardando PRA en Firebase:', err);
         const msg = pdfDownloaded
