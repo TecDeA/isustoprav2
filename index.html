@@ -1138,7 +1138,7 @@
 
     if (!username) return setAuthError(setupError, 'Introduce un nombre de usuario.');
     if (username.length < 3) return setAuthError(setupError, 'El usuario debe tener al menos 3 caracteres.');
-    if (!/^[a-zA-Z0-9._-]+$/.test(username)) return setAuthError(setupError, 'Solo letras, números, ".", "_" y "-".');
+    if (!/^[a-z0-9._-]+$/.test(username)) return setAuthError(setupError, 'Solo minúsculas, números, ".", "_" y "-".');
     if (p1.length < 6) return setAuthError(setupError, 'La contraseña debe tener al menos 6 caracteres.');
     if (p1 !== p2) return setAuthError(setupError, 'Las contraseñas no coinciden.');
 
@@ -1801,7 +1801,7 @@
 
     if (!username) return setAuthError(errEl, 'Introduce un nombre de usuario.');
     if (username.length < 3) return setAuthError(errEl, 'El usuario debe tener al menos 3 caracteres.');
-    if (!/^[a-zA-Z0-9._-]+$/.test(username)) return setAuthError(errEl, 'Solo letras, números, ".", "_" y "-".');
+    if (!/^[a-z0-9._-]+$/.test(username)) return setAuthError(errEl, 'Solo minúsculas, números, ".", "_" y "-".');
     if (p1.length < 6) return setAuthError(errEl, 'Contraseña mínima: 6 caracteres.');
     if (p1 !== p2) return setAuthError(errEl, 'Las contraseñas no coinciden.');
     if (role !== 'user' && role !== 'admin') return setAuthError(errEl, 'Perfil no válido.');
@@ -2007,6 +2007,11 @@
     if (!confirm(`¿Eliminar el PRA de "${name}"?`)) return;
     try {
       await fbDb.ref(fbPath(`courses/${yearId}/pras/${praId}`)).remove();
+      // Bug D fix: actualizar savedPrasCache en memoria para que la próxima
+      // apertura del modal sea inmediata sin necesidad de refetch.
+      if (savedPrasCache[yearId]) {
+        savedPrasCache[yearId] = savedPrasCache[yearId].filter(p => p.id !== praId);
+      }
       await renderSavedPrasList();
     } catch (e) {
       alert('Error: ' + translateFirebaseError(e));
@@ -2120,7 +2125,19 @@
 
   function cancelEditPRA() {
     editingPraRef = null;
+    profileManuallySet = false;
     updateEditingBanner();
+    // Bug P fix: preguntar si también quiere limpiar los datos
+    // restaurados del PRA que estaba editando. Si no, los valores
+    // quedan en los inputs y el siguiente "Guardar" crearía un PRA
+    // nuevo con esos datos (lo cual puede ser lo deseado, pero también
+    // puede confundir).
+    if (evaluations.length > 0 || (document.getElementById('studentGroup') && document.getElementById('studentGroup').value)) {
+      // No forzamos reset automático; el banner ya no está, así que el
+      // usuario sabe que cualquier "Guardar" siguiente será un PRA nuevo.
+      // Solo mostramos un mensaje informativo sutil en consola.
+      console.info('[editPRA] Edición cancelada. Los datos restaurados siguen en pantalla; pulsa "Nuevo alumno" para limpiarlos.');
+    }
   }
 
   function updateEditingBanner() {
@@ -2262,7 +2279,18 @@
     if (!fbDb) return;
     const groupsList = document.getElementById('groupsList');
     const tutorsList = document.getElementById('tutorsList');
-    if (!groupsList || !tutorsList) return;
+    // Los datalist están dentro de #resultsSection, que existe desde el
+    // inicio (aunque oculto). Si por alguna razón no se encontraran,
+    // reintentar hasta 5 veces con backoff (Bug A: evitar bucle infinito).
+    if (!groupsList || !tutorsList) {
+      if (!loadGroupTutorSuggestions._retries) loadGroupTutorSuggestions._retries = 0;
+      if (loadGroupTutorSuggestions._retries < 5) {
+        loadGroupTutorSuggestions._retries++;
+        setTimeout(loadGroupTutorSuggestions, 200 * loadGroupTutorSuggestions._retries);
+      }
+      return;
+    }
+    loadGroupTutorSuggestions._retries = 0;
     try {
       const snap = await fbDb.ref(fbPath('groupTutor')).get();
       const groups = [];
@@ -2289,10 +2317,12 @@
       // Ordenar: primero los que tienen más asociaciones (más usados)
       groups.sort((a, b) => b.count - a.count);
       tutors.sort((a, b) => b.count - a.count);
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
       groupsList.innerHTML = groups
-        .map(g => `<option value="${g.label.replace(/"/g, '&quot;')}"></option>`).join('');
+        .map(g => `<option value="${esc(g.label)}"></option>`).join('');
       tutorsList.innerHTML = tutors
-        .map(t => `<option value="${t.label.replace(/"/g, '&quot;')}"></option>`).join('');
+        .map(t => `<option value="${esc(t.label)}"></option>`).join('');
+      console.log(`[groupTutor] Sugerencias cargadas: ${groups.length} grupos, ${tutors.length} tutores`);
     } catch (e) {
       console.warn('No se pudieron cargar sugerencias grupo/tutor:', e);
     }
@@ -2896,6 +2926,11 @@
 
     initialMessage.classList.add('hidden'); resultsSection.classList.remove('hidden'); nextButton.disabled = false;
 
+    // Bug B fix: NO llamar a loadGroupTutorSuggestions() aquí.
+    // renderSelectedResults se ejecuta en CADA selección/deselección de
+    // evaluación, lo que dispararía una lectura a Firebase por cada click.
+    // Las sugerencias ya se cargan al iniciar sesión y al volver a pantalla 1.
+
     const studentName = evaluations.length > 0 ? evaluations[0].student : 'Desconocido';
     const subjects = [...new Set(selectedData.map(e => e.subject))];
     const courses = [...new Set(selectedData.map(e => e.course))];
@@ -3330,7 +3365,10 @@
     ];
     const emptySections = [];
     for (const section of requiredSections) {
-      if (!selectedAdditionalFields[section] || selectedAdditionalFields[section].length === 0) emptySections.push(section);
+      const items = selectedAdditionalFields[section];
+      // Bug O fix: filtrar items nulos/vacíos antes de contar.
+      const validItems = (items || []).filter(i => i && String(i).trim());
+      if (validItems.length === 0) emptySections.push(section);
     }
     if (emptySections.length === 0) return true;
     let msg = "";
@@ -3642,6 +3680,11 @@
    * ============================================================ */
   function regeneratePRAPdf(data) {
     try {
+      // Bug S fix: validar que data es un objeto no nulo antes de proceder.
+      if (!data || typeof data !== 'object') {
+        alert('No se puede regenerar el PDF: datos inválidos.');
+        return;
+      }
       if (typeof jspdf === 'undefined') { alert('jsPDF no disponible.'); return; }
       const { jsPDF } = jspdf, doc = new jsPDF();
       const studentName = data.studentName || 'Desconocido';
@@ -4098,6 +4141,51 @@
       }
     });
   }
+
+  /* ============================================================
+   * Bug C fix: cerrar modales con Escape y con click en backdrop
+   * ============================================================ */
+  // Mapa de modales a sus funciones de cierre
+  const MODAL_CLOSE_HANDLERS = {
+    'helpModal':        () => closeHelp(),
+    'validationModal':  () => closeValidationModal(),
+    'userMgmtModal':    () => closeUserManagementModal(),
+    'savedPrasModal':   () => closeSavedPrasModal(),
+    'courseMgmtModal':  () => closeCourseMgmtModal(),
+  };
+
+  // Cerrar con tecla Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    // No cerrar si el overlay de auth está visible (login/setup)
+    const authOverlay = document.getElementById('authOverlay');
+    if (authOverlay && !authOverlay.classList.contains('hidden')) return;
+    // Cerrar el primer modal visible (de arriba a abajo en prioridad)
+    for (const [id, closeFn] of Object.entries(MODAL_CLOSE_HANDLERS)) {
+      const modal = document.getElementById(id);
+      if (modal && !modal.classList.contains('hidden')) {
+        e.preventDefault();
+        closeFn();
+        return;
+      }
+    }
+  });
+
+  // Cerrar con click en backdrop (la zona oscura fuera del panel blanco)
+  document.addEventListener('click', (e) => {
+    // Solo considerar modales visibles
+    for (const [id, closeFn] of Object.entries(MODAL_CLOSE_HANDLERS)) {
+      const modal = document.getElementById(id);
+      if (!modal || modal.classList.contains('hidden')) continue;
+      // El backdrop es el propio div#id (con class bg-black/60).
+      // Si el target es el propio modal (no un hijo), se considera click en backdrop.
+      if (e.target === modal) {
+        e.preventDefault();
+        closeFn();
+        return;
+      }
+    }
+  });
   </script>
 
   <!-- ============================================================
@@ -4120,16 +4208,18 @@
       // ============================================================
       const here = location.pathname; // p. ej. /isustoprav2/index.html
       const swUrl = new URL('./sw.js', location.href).pathname; // p. ej. /isustoprav2/sw.js
-      const swDir = (swUrl.replace(/\/[^/]*$/, '') || '/'); // p. ej. /isustoprav2
+      // Bug T fix: normalizar barras duplicadas en el path por si acaso.
+      const swDir = (swUrl.replace(/\/[^/]*$/, '').replace(/\/+/g, '/') || '/');
       if (swDir === '/') {
         console.warn('[ISUStoPRA] No se registra el SW: está en la raíz del dominio. Interferiría con el portal.');
         loadAppVersion();
         return;
       }
-      const inScope = here === swDir || here.startsWith(swDir + '/');
+      const hereNorm = here.replace(/\/+/g, '/');
+      const inScope = hereNorm === swDir || hereNorm.startsWith(swDir + '/');
       if (!inScope) {
         console.warn('[ISUStoPRA] No se registra el SW: la página no está bajo su directorio (',
-          swDir, 'vs', here, ').');
+          swDir, 'vs', hereNorm, ').');
         loadAppVersion();
         return;
       }
