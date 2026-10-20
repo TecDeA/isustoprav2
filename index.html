@@ -207,7 +207,7 @@
     <div class="auth-card w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
       <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white p-6 text-center">
         <div class="bg-white/15 inline-flex p-3 rounded-xl mb-3"><i class="fa-solid fa-file-pdf text-2xl"></i></div>
-        <h2 class="text-xl font-bold">De ISUS a PRA</h2>
+        <h2 class="text-xl font-bold">ISUS to PRA V2</h2>
         <p id="authSubtitle" class="text-blue-100 text-sm mt-1">Inicia sesión para continuar</p>
       </div>
 
@@ -742,15 +742,17 @@
                 <label for="studentGroup" class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Grupo <span class="text-red-500">*</span>
                 </label>
-                <input id="studentGroup" type="text" placeholder="ej. 4ºA"
+                <input id="studentGroup" type="text" placeholder="ej. 4ºA" list="groupsList" autocomplete="off"
                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                <datalist id="groupsList"></datalist>
               </div>
               <div>
                 <label for="studentTutor" class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Tutor/a <span class="text-red-500">*</span>
                 </label>
-                <input id="studentTutor" type="text" placeholder="ej. Prof. García"
+                <input id="studentTutor" type="text" placeholder="ej. Prof. García" list="tutorsList" autocomplete="off"
                   class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                <datalist id="tutorsList"></datalist>
               </div>
               <div>
                 <label for="studentCourseLabel" class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Curso académico</label>
@@ -1230,6 +1232,9 @@
           // Cargar el curso académico activo desde Firebase (con fallback automático)
           await loadActiveAcademicYear();
           refreshCourseChip();
+          // Cargar sugerencias de grupos y tutores para autocompletado
+          loadGroupTutorSuggestions();
+          setupGroupTutorListeners();
         } catch (e) {
           console.error('Error cargando metadata de usuario:', e);
           try { await fbAuth.signOut(); } catch (_) {}
@@ -2134,7 +2139,173 @@
       generatedByUsername: currentUser.username,
       academicYear: yearId
     });
+    // Guardar también la asociación grupo↔tutor/a para autocompletar futuros PRAs
+    try { await saveGroupTutorAssociation(praData.group, praData.tutor, praData.academicYear || yearId); }
+    catch (e) { console.warn('No se pudo guardar asociación grupo/tutor:', e); }
     return { yearId, praId: ref.key };
+  }
+
+  /* ============================================================
+   * ASOCIACIONES GRUPO ↔ TUTOR/A
+   * ------------------------------------------------------------
+   * Se guardan en: isustopra/groupTutor/
+   *   {grupo_normalizado}/
+   *     tutors/
+   *       {tutor_normalizado}: { label: "Prof. García", count: N, lastUsed: ts }
+   *   {tutor_normalizado}/
+   *     groups/
+   *       {grupo_normalizado}: { label: "4ºA", count: N, lastUsed: ts }
+   *
+   * Al cargar la app, leemos estos dos índices y rellenamos los
+   * <datalist> de grupo y tutor para que aparezcan como sugerencias
+   * autocompletables en sucesivos PRAs.
+   *
+   * Modelo deliberadamente simple: dos índices "invertidos"
+   * (grupo→tutores y tutor→grupos) para poder ofrecer sugerencias
+   * cruzadas (al escribir un grupo, sugerir sus tutores, y viceversa).
+   * ============================================================ */
+
+  function normalizeKey(s) {
+    // Normaliza para usar como clave en Firebase: minúsculas, sin
+    // acentos, sin espacios extra. Conserva ñ→n para simplificar.
+    return String(s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  }
+
+  async function saveGroupTutorAssociation(group, tutor, yearId) {
+    if (!fbDb || !group || !tutor) return;
+    const gKey = normalizeKey(group);
+    const tKey = normalizeKey(tutor);
+    if (!gKey || !tKey) return;
+
+    const updates = {};
+
+    // Índice grupo→tutores
+    const g2tPath = fbPath(`groupTutor/groups/${gKey}/tutors/${tKey}`);
+    updates[`${g2tPath}/label`] = tutor;
+    updates[`${g2tPath}/count`] = firebase.database.ServerValue.increment(1);
+    updates[`${g2tPath}/lastUsed`] = firebase.database.ServerValue.TIMESTAMP;
+    updates[`${g2tPath}/lastYear`] = yearId;
+    updates[fbPath(`groupTutor/groups/${gKey}/label`)] = group;
+    updates[fbPath(`groupTutor/groups/${gKey}/lastUsed`)] = firebase.database.ServerValue.TIMESTAMP;
+
+    // Índice tutor→grupos
+    const t2gPath = fbPath(`groupTutor/tutors/${tKey}/groups/${gKey}`);
+    updates[`${t2gPath}/label`] = group;
+    updates[`${t2gPath}/count`] = firebase.database.ServerValue.increment(1);
+    updates[`${t2gPath}/lastUsed`] = firebase.database.ServerValue.TIMESTAMP;
+    updates[`${t2gPath}/lastYear`] = yearId;
+    updates[fbPath(`groupTutor/tutors/${tKey}/label`)] = tutor;
+    updates[fbPath(`groupTutor/tutors/${tKey}/lastUsed`)] = firebase.database.ServerValue.TIMESTAMP;
+
+    await fbDb.ref().update(updates);
+  }
+
+  /** Carga todas las asociaciones y rellena los <datalist> de grupo
+   *  y tutor/a. Se llama tras el login y al volver a la pantalla 1. */
+  async function loadGroupTutorSuggestions() {
+    if (!fbDb) return;
+    const groupsList = document.getElementById('groupsList');
+    const tutorsList = document.getElementById('tutorsList');
+    if (!groupsList || !tutorsList) return;
+    try {
+      const snap = await fbDb.ref(fbPath('groupTutor')).get();
+      const groups = [];
+      const tutors = [];
+      if (snap && snap.exists()) {
+        const data = snap.val();
+        if (data.groups) {
+          Object.keys(data.groups).forEach(k => {
+            const lbl = data.groups[k].label;
+            const cnt = data.groups[k].tutors
+              ? Object.keys(data.groups[k].tutors).length : 0;
+            if (lbl) groups.push({ label: lbl, count: cnt });
+          });
+        }
+        if (data.tutors) {
+          Object.keys(data.tutors).forEach(k => {
+            const lbl = data.tutors[k].label;
+            const cnt = data.tutors[k].groups
+              ? Object.keys(data.tutors[k].groups).length : 0;
+            if (lbl) tutors.push({ label: lbl, count: cnt });
+          });
+        }
+      }
+      // Ordenar: primero los que tienen más asociaciones (más usados)
+      groups.sort((a, b) => b.count - a.count);
+      tutors.sort((a, b) => b.count - a.count);
+      groupsList.innerHTML = groups
+        .map(g => `<option value="${g.label.replace(/"/g, '&quot;')}"></option>`).join('');
+      tutorsList.innerHTML = tutors
+        .map(t => `<option value="${t.label.replace(/"/g, '&quot;')}"></option>`).join('');
+    } catch (e) {
+      console.warn('No se pudieron cargar sugerencias grupo/tutor:', e);
+    }
+  }
+
+  /** Filtra los tutores sugeridos según el grupo actual, y viceversa.
+   *  Se llama al cambiar el contenido de cualquiera de los dos inputs. */
+  async function filterGroupTutorSuggestions(changed) {
+    if (!fbDb) return;
+    const groupInput = document.getElementById('studentGroup');
+    const tutorInput = document.getElementById('studentTutor');
+    const groupsList = document.getElementById('groupsList');
+    const tutorsList = document.getElementById('tutorsList');
+    if (!groupInput || !tutorInput || !groupsList || !tutorsList) return;
+
+    const gKey = normalizeKey(groupInput.value);
+    const tKey = normalizeKey(tutorInput.value);
+
+    try {
+      // Si cambió el grupo y hay un grupo válido, sugerir los tutores de ese grupo
+      if (changed === 'group' && gKey) {
+        const snap = await fbDb.ref(fbPath(`groupTutor/groups/${gKey}/tutors`)).get();
+        const tutors = [];
+        if (snap && snap.exists()) {
+          snap.forEach(c => {
+            const v = c.val();
+            if (v && v.label) tutors.push({ label: v.label, count: v.count || 0 });
+          });
+        }
+        // Si el grupo no tiene tutores conocidos, cargar todos
+        if (tutors.length === 0) {
+          await loadGroupTutorSuggestions();
+        } else {
+          tutors.sort((a, b) => b.count - a.count);
+          tutorsList.innerHTML = tutors
+            .map(t => `<option value="${t.label.replace(/"/g, '&quot;')}"></option>`).join('');
+        }
+      }
+      // Si cambió el tutor y hay un tutor válido, sugerir los grupos de ese tutor
+      if (changed === 'tutor' && tKey) {
+        const snap = await fbDb.ref(fbPath(`groupTutor/tutors/${tKey}/groups`)).get();
+        const groups = [];
+        if (snap && snap.exists()) {
+          snap.forEach(c => {
+            const v = c.val();
+            if (v && v.label) groups.push({ label: v.label, count: v.count || 0 });
+          });
+        }
+        if (groups.length === 0) {
+          await loadGroupTutorSuggestions();
+        } else {
+          groups.sort((a, b) => b.count - a.count);
+          groupsList.innerHTML = groups
+            .map(g => `<option value="${g.label.replace(/"/g, '&quot;')}"></option>`).join('');
+        }
+      }
+    } catch (e) {
+      console.warn('Error filtrando sugerencias grupo/tutor:', e);
+    }
+  }
+
+  // Configura listeners en los inputs para refinar sugerencias cruzadas
+  function setupGroupTutorListeners() {
+    const g = document.getElementById('studentGroup');
+    const t = document.getElementById('studentTutor');
+    if (g) g.addEventListener('change', () => filterGroupTutorSuggestions('group'));
+    if (t) t.addEventListener('change', () => filterGroupTutorSuggestions('tutor'));
   }
 
   /* ============================================================
@@ -2383,6 +2554,8 @@
       if (screenNumber === 1) {
         const hasSelected = getSelectedEvaluationsData().length > 0;
         nextButton.disabled = !hasSelected;
+        // Recargar sugerencias de grupos/tutores (por si se han guardado nuevas)
+        if (currentUser) loadGroupTutorSuggestions();
       } else if (screenNumber === 2) {
         if (getSelectedEvaluationsData().length === 0) { showError("Debes cargar y seleccionar al menos un informe PDF."); goToScreen(1); return; }
         consolidatedFailedCriteria = getConsolidatedFailedCriteria(); renderScreen2();
