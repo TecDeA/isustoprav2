@@ -635,6 +635,17 @@
     <div id="screen1" class="flex flex-col lg:flex-row gap-6">
       <!-- Left column -->
       <div class="w-full lg:w-1/3 space-y-6">
+        <!-- Quick actions: abrir PRA guardado -->
+        <div class="bg-gradient-to-br from-violet-50 to-blue-50 rounded-2xl shadow-sm border border-violet-200 p-4">
+          <h2 class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+            <i class="fa-solid fa-folder-open text-violet-600"></i> PRAs guardados
+          </h2>
+          <p class="text-xs text-slate-500 mb-3">Abre un PRA ya existente para revisarlo, editarlo o eliminarlo.</p>
+          <button onclick="openSavedPrasModal()" class="w-full bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
+            <i class="fa-solid fa-folder-open"></i> Abrir PRA guardado
+          </button>
+        </div>
+
         <div id="uploadSection" class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200 p-6">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-xl font-bold text-slate-800">Cargar ISUS</h2>
@@ -918,14 +929,20 @@
                 class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg mobile-p-3 w-full md:w-auto flex items-center justify-center gap-2">
           <i class="fa-solid fa-arrow-left mr-1"></i> Atrás
         </button>
-        <div class="flex gap-2 md:gap-3">
+        <div class="flex gap-2 md:gap-3 flex-wrap justify-end">
           <button onclick="resetApp()"
                   class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto">
             <i class="fa-solid fa-plus"></i> Nuevo alumno
           </button>
-          <button onclick="generatePRA()"
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> Generar PRA
+          <button id="btnSaveOnly" onclick="generatePRA({ downloadPdf: false })"
+                  class="bg-violet-600 hover:bg-violet-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto"
+                  title="Guarda el PRA en Firebase, sin descargar el PDF">
+            <i class="fa-solid fa-cloud-arrow-up"></i> Guardar
+          </button>
+          <button id="btnSaveAndPdf" onclick="generatePRA({ downloadPdf: true })"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto"
+                  title="Guarda el PRA en Firebase y descarga el PDF">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Guardar + PDF
           </button>
         </div>
       </div>
@@ -1251,10 +1268,10 @@
       document.querySelectorAll('#footerButtons4 button').forEach(b => b.classList.remove('hidden'));
     } else {
       userMgmtMenuBtn.classList.add('hidden');
-      // Usuario de solo lectura: ocultar botones de generación y reset
+      // Usuario de solo lectura: ocultar botones de generación (ambos modos) y reset
       document.querySelectorAll('#footerButtons4 button').forEach(b => {
         const onclick = b.getAttribute('onclick') || '';
-        if (onclick === 'generatePRA()' || onclick === 'resetApp()') {
+        if (onclick.indexOf('generatePRA(') !== -1 || onclick === 'resetApp()') {
           b.classList.add('hidden');
         }
       });
@@ -1935,6 +1952,7 @@
               <button onclick="viewSavedPRA('${yearId}', '${p.id}')" class="text-blue-600 hover:bg-blue-50 p-2 rounded-full" title="Ver / descargar PDF">
                 <i class="fa-solid fa-eye"></i>
               </button>
+              ${canDelete ? `<button onclick="editSavedPRA('${yearId}', '${p.id}')" class="text-violet-600 hover:bg-violet-50 p-2 rounded-full" title="Editar"><i class="fa-solid fa-pen"></i></button>` : ''}
               ${canDelete ? `<button onclick="deleteSavedPRA('${yearId}', '${p.id}', '${safeName}')" class="text-red-500 hover:bg-red-50 p-2 rounded-full" title="Eliminar"><i class="fa-solid fa-trash-can"></i></button>` : ''}
             </div>
           </div>
@@ -1970,12 +1988,144 @@
   }
 
   /* ============================================================
-   * GUARDAR PRA EN FIREBASE
+   * EDITAR PRA GUARDADO
+   * ------------------------------------------------------------
+   * Carga los datos del PRA desde Firebase y los restaura en el
+   * asistente (pantallas 1-4) para que el admin pueda modificarlos
+   * y volver a guardar (esta vez como actualización).
    * ============================================================ */
-  async function savePRAToFirebase(praData) {
+  let editingPraRef = null; // { yearId, praId } cuando se está editando
+
+  async function editSavedPRA(yearId, praId) {
+    if (!requireAdmin()) return;
+    try {
+      const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras/${praId}`)).get();
+      if (!snap || !snap.exists()) return alert('PRA no encontrado.');
+      const data = snap.val();
+      if (!data) return alert('PRA sin datos.');
+
+      // Confirmar si ya hay un PRA en curso sin guardar
+      if (evaluations.length > 0 || Object.keys(selectedAdditionalFields).length > 0) {
+        if (!confirm('Hay datos en curso del PRA actual que se perderán al cargar el PRA guardado. ¿Continuar?')) {
+          return;
+        }
+      }
+
+      // Restaurar estado lógico
+      evaluations = (data.evaluations || []).map(e => ({
+        id: generateId(),
+        fileName: e.fileName || '',
+        student: e.student || data.studentName || 'Desconocido',
+        subject: e.subject || 'Desconocida',
+        course: e.course || 'Desconocido',
+        criteria: e.criteria || [],
+        uniqueHash: e.uniqueHash || ''
+      }));
+      selectedEvaluationIds = evaluations.map(e => e.id);
+
+      selectedAdditionalFields = data.selectedAdditionalFields
+        ? JSON.parse(JSON.stringify(data.selectedAdditionalFields))
+        : {};
+      textAreaState = data.textAreaState
+        ? JSON.parse(JSON.stringify(data.textAreaState))
+        : { tareas: '', otros: {} };
+
+      // Marcar que estamos editando
+      editingPraRef = { yearId, praId };
+
+      // Cerrar modal
+      closeSavedPrasModal();
+
+      // Ir a pantalla 1 y restaurar UI
+      goToScreen(1);
+      updateLoadedEvaluationsUI();
+      renderSelectedResults();
+
+      // Rellenar grupo y tutor/a
+      const g = document.getElementById('studentGroup');
+      const t = document.getElementById('studentTutor');
+      if (g) g.value = data.group || '';
+      if (t) t.value = data.tutor || '';
+
+      // Restaurar perfil seleccionado
+      if (data.profile) {
+        const radio = document.getElementById(data.profile);
+        if (radio) radio.checked = true;
+      }
+
+      // Restaurar textareas (si los hubiere) tras render de pantalla 4
+      // No llamamos a loadAdditionalFields aquí (se hace al entrar en pantalla 4),
+      // pero guardamos el estado en textAreaState que ya se rehidratará.
+      try { localStorage.setItem('textAreaState', JSON.stringify(textAreaState)); } catch {}
+
+      // Mostrar banner de edición
+      updateEditingBanner();
+
+      alert(`PRA de "${data.studentName || '—'}" cargado para edición.\n\nRealiza los cambios y pulsa "Guardar" o "Guardar + PDF" para actualizar el PRA existente en la nube.\n\nSi pulsas "Nuevo alumno" se cancelará la edición sin guardar.`);
+    } catch (e) {
+      console.error('Error cargando PRA para edición:', e);
+      alert('Error al cargar PRA: ' + e.message);
+    }
+  }
+
+  function cancelEditPRA() {
+    editingPraRef = null;
+    updateEditingBanner();
+  }
+
+  function updateEditingBanner() {
+    let banner = document.getElementById('editingBanner');
+    if (!editingPraRef) {
+      if (banner) banner.classList.add('hidden');
+      return;
+    }
+    if (!banner) {
+      // Crear el banner dinámicamente al principio de <main>
+      const main = document.querySelector('main');
+      banner = document.createElement('div');
+      banner.id = 'editingBanner';
+      banner.className = 'bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-3 mb-4 flex items-center justify-between gap-3';
+      main.insertBefore(banner, main.firstChild);
+    }
+    banner.classList.remove('hidden');
+    banner.innerHTML = `
+      <div class="flex items-center gap-3 min-w-0">
+        <i class="fa-solid fa-pen-to-square text-amber-600 text-lg"></i>
+        <div class="min-w-0">
+          <p class="font-semibold text-sm">Editando PRA existente</p>
+          <p class="text-xs text-amber-700">Curso <span class="font-mono">${editingPraRef.yearId}</span> · PRA <span class="font-mono">${editingPraRef.praId.substring(0,8)}…</span>. Los cambios sobrescribirán el PRA guardado al pulsar "Guardar".</p>
+        </div>
+      </div>
+      <button onclick="cancelEditPRA()" class="text-xs bg-amber-200 hover:bg-amber-300 text-amber-900 font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap">
+        Cancelar edición
+      </button>
+    `;
+  }
+
+  /* ============================================================
+   * GUARDAR PRA EN FIREBASE
+   * ------------------------------------------------------------
+   * Si editRef es null → crea un nuevo PRA (push).
+   * Si editRef = { yearId, praId } → actualiza el PRA existente.
+   * ============================================================ */
+  async function savePRAToFirebase(praData, editRef) {
     if (!fbDb) return null;
     if (!currentUser) throw new Error('No autenticado');
-    const yearId = getActiveAcademicYear();
+
+    if (editRef && editRef.yearId && editRef.praId) {
+      // Modo edición: actualizar PRA existente
+      const ref = fbDb.ref(fbPath(`courses/${editRef.yearId}/pras/${editRef.praId}`));
+      await ref.update({
+        ...praData,
+        updatedAt: firebase.database.ServerValue.TIMESTAMP,
+        updatedBy: currentUser.uid,
+        updatedByUsername: currentUser.username
+      });
+      return { yearId: editRef.yearId, praId: editRef.praId };
+    }
+
+    // Modo creación: push nuevo
+    const yearId = praData.academicYear || getActiveAcademicYear();
     const ref = fbDb.ref(fbPath(`courses/${yearId}/pras`)).push();
     await ref.set({
       ...praData,
@@ -2964,7 +3114,9 @@
    *   4) Tras generar el PDF, guarda el PRA en Firebase bajo
    *      /courses/{yearId}/pras/{praId} (aislamiento por curso).
    * ============================================================ */
-  function generatePRA() {
+  function generatePRA(options) {
+    options = options || {};
+    const downloadPdf = options.downloadPdf !== false;  // default true si no se especifica
     if (currentUser && currentUser.role !== 'admin') {
       alert('Solo los administradores pueden generar PRAs.');
       return;
@@ -2984,9 +3136,11 @@
 
     try {
       saveTextAreaState();
-      if (typeof jspdf === 'undefined') { alert('Error: La librería para generar PDF no está cargada correctamente. Recarga la página e intenta nuevamente.'); return; }
-      const { jsPDF } = jspdf, doc = new jsPDF(),
-            studentName = evaluations.length > 0 ? evaluations[0].student : "Desconocido",
+      if (downloadPdf && typeof jspdf === 'undefined') {
+        alert('Error: La librería para generar PDF no está cargada correctamente. Recarga la página e intenta nuevamente.');
+        return;
+      }
+      const studentName = evaluations.length > 0 ? evaluations[0].student : "Desconocido",
             profile = getSelectedProfile(),
             failedCriteria = getConsolidatedFailedCriteriaList(),
             selectedData = getSelectedEvaluationsData(),
@@ -3006,166 +3160,13 @@
       fileName += `_${studentSafe}.pdf`;
       fileName = fileName.replace(/_+/g, '_');
 
-      // PDF header
-      doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
-      doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont("helvetica", "bold");
-      doc.text("PROGRAMA DE REFUERZO DEL APRENDIZAJE", 105, 13, { align: "center" });
-      doc.setTextColor(0, 0, 0); doc.setFontSize(11); doc.setFont("helvetica", "normal");
-
-      let y = 35, pageHeight = 280, margin = 14, maxWidth = 180, lineHeight = 7;
-      function checkPageBreak(h) { if (y + h > pageHeight) { doc.addPage(); y = 20; return true; } return false; }
-      function addText(text, isBold = false, customY = null, customMaxWidth = maxWidth) {
-        const currentY = customY !== null ? customY : y;
-        doc.setFont("helvetica", isBold ? "bold" : "normal");
-        const safeText = text ? String(text) : '', lines = doc.splitTextToSize(safeText, customMaxWidth), textHeight = lines.length * lineHeight;
-        if (currentY + textHeight > pageHeight) { doc.addPage(); y = 20; addText(text, isBold, y, customMaxWidth); return y + textHeight + 5; }
-        doc.text(lines, margin, currentY);
-        return currentY + textHeight + 5;
-      }
-      function addSection(title, content) {
-        checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(title, margin, y);
-        doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1);
-        y += 10; y = addText(content || '', false, y); return y;
-      }
-
       const praType = getPRAType();
       const programType = getProgramType();
       const subjectsWithCourse = selectedData.map(e => `${e.subject} (${e.course})`);
       const uniqueSubjectsWithCourse = [...new Set(subjectsWithCourse)];
       const yearId = getActiveAcademicYear();
 
-      // Datos del alumno (incluye grupo y tutor/a + curso académico)
-      y = addSection(
-        "DATOS DEL ALUMNO/A",
-        `Nombre: ${studentName}\nGrupo: ${group}\nTutor/a: ${tutor}\nTipo de programa: ${programType}\nMaterias: ${uniqueSubjectsWithCourse.join(', ')}\nCurso académico: ${yearId}`
-      );
-      y = addSection("TIPO DE PRA", `${praType}`);
-
-      if (profile === 'profileOption1' || profile === 'profileOption3') {
-        let criteriaText = "";
-        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
-        Object.keys(groupedCriteria).sort().forEach(course => {
-          Object.keys(groupedCriteria[course]).sort().forEach(subject => {
-            if (profile === 'profileOption3' && course.includes('4')) return;
-            const criteria = groupedCriteria[course][subject];
-            const subjectCode = getSubjectCode(subject, course);
-            const fullSubjectName = getFullSubjectName(subject, course);
-            criteriaText += `${fullSubjectName} (${subjectCode}): ${criteria.map(c => c.code).join(", ")}\n\n`;
-          });
-        });
-        if (criteriaText) {
-          checkPageBreak(20); doc.setFont("helvetica", "bold"); doc.text("CRITERIOS A SUPERAR", margin, y);
-          doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1); y += 8; doc.setFont("helvetica", "normal");
-          const lines = criteriaText.split('\n');
-          lines.forEach(line => { if (line.trim()) { y = addText(line, false, y); y += 2; } });
-        }
-      }
-
-      checkPageBreak(20); doc.setFillColor(220, 252, 231); doc.rect(margin, y-5, 182, 10, 'F');
-      doc.setTextColor(21, 128, 61); doc.setFont("helvetica", "bold"); doc.text("PROPUESTA DE REFUERZO", 105, y+1, { align: "center" });
-      y += 15; doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "normal");
-
-      if (profile === 'profileOption2') {
-        let texto = "El alumno/a cursa TEC4 y repite curso. Se trabajarán todos los criterios de Tecnología 4º.\n\nSe podrán proponer actividades adicionales que desarrollen los criterios:";
-        y = addText(texto);
-        allTEC4Criteria.forEach(id => {
-          checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
-          doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
-          const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
-          if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
-          doc.text(descLines, 35, y); y += descHeight + 4;
-        });
-      } else if (profile === 'profileOption3') {
-        const relatedTEC4 = getRelatedTEC4Criteria(failedCriteria);
-        let texto = "Criterios de Tecnología 4º a reforzar en base a las materias del departamento no superadas.\n\nSe podrán proponer actividades adicionales a lo largo del curso:";
-        y = addText(texto);
-        if (relatedTEC4.length === 0) { y = addText("No se han detectado criterios específicos correlacionados."); }
-        else {
-          relatedTEC4.forEach(id => {
-            checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
-            doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
-            const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
-            if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
-            doc.text(descLines, 35, y); y += descHeight + 4;
-          });
-        }
-      } else {
-        let texto = "El/la alumno/a deberá realizar actividades para superar los criterios no superados del Departamento.\n\nLa entrega se realizará en Classroom del Departamento.\n\nSe proporcionará una evaluación pormenorizada por criterio.";
-        y = addText(texto);
-        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
-        Object.keys(groupedCriteria).sort().forEach(course => {
-          Object.keys(groupedCriteria[course]).sort().forEach(subject => {
-            checkPageBreak(15);
-            const subjectCode = getSubjectCode(subject, course);
-            const fullSubjectName = getFullSubjectName(subject, course);
-            doc.setFont("helvetica", "bold"); doc.text(`${fullSubjectName} (${subjectCode})`, margin, y); y += 7;
-            const criteria = groupedCriteria[course][subject], codesList = criteria.map(c => c.code).join(", ");
-            checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 180 }); y += lineHeight * 2; y += 5;
-          });
-        });
-      }
-
-      if (Object.keys(selectedAdditionalFields).length > 0) {
-        checkPageBreak(20); y += 10;
-        doc.setFillColor(240, 249, 255); doc.rect(margin, y-5, 182, 10, 'F');
-        doc.setTextColor(37, 99, 235); doc.setFont("helvetica", "bold");
-        doc.text("OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA", 105, y+1, { align: "center" });
-        y += 15; doc.setTextColor(0, 0, 0);
-
-        for (const [section, items] of Object.entries(selectedAdditionalFields)) {
-          checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(section, margin, y); y += 7;
-          if (items.length === 0) { doc.setFont("helvetica", "italic"); y = addText("No se han seleccionado elementos específicos.", false, y); }
-          else {
-            doc.setFont("helvetica", "normal");
-
-            if (section === "TIPO DE ACTIVIDADES Y TAREAS") {
-              if (items.includes("Tareas (precisar)") && textAreaState.tareas) {
-                checkPageBreak(10); doc.text("Tareas específicas:", margin, y); y += lineHeight;
-                const lines = textAreaState.tareas.split('\n').filter(l => l.trim());
-                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
-                y += 5;
-              }
-              let normal = false;
-              items.forEach(item => {
-                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
-                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
-                }
-              });
-              if (normal) y += 5;
-              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
-                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
-                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
-                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
-                y += 5;
-              }
-            } else {
-              let normal = false;
-              items.forEach(item => {
-                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
-                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
-                }
-              });
-              if (normal) y += 5;
-              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
-                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
-                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
-                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
-                y += 5;
-              }
-            }
-          }
-          doc.setDrawColor(200, 200, 200); doc.line(margin, y, 196, y); y += 10;
-        }
-      }
-
-      const pageCount = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
-        doc.text("Generado automáticamente por ISUStoPRA - Dpto. Tecnología", 105, 290, { align: "center" });
-        doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
-      }
-
-      // Guardar PRA en Firebase (aislado por curso académico)
+      // Construir el objeto de datos del PRA (se guarda SIEMPRE en la nube)
       const praData = {
         studentName: studentName,
         group: group,
@@ -3182,22 +3183,199 @@
           criteria: e.criteria,
           uniqueHash: e.uniqueHash
         })),
-        selectedAdditionalFields: selectedAdditionalFields,
-        textAreaState: textAreaState,
+        selectedAdditionalFields: JSON.parse(JSON.stringify(selectedAdditionalFields)),
+        textAreaState: JSON.parse(JSON.stringify(textAreaState)),
         failedCriteria: failedCriteria,
-        fileName: fileName
+        fileName: fileName,
+        academicYear: yearId
       };
-      savePRAToFirebase(praData).then(({ yearId: yid, praId } = {}) => {
-        console.log('PRA guardado en Firebase:', yid, praId);
-      }).catch(err => {
-        console.error('Error guardando PRA en Firebase (el PDF ya se ha descargado):', err);
-        alert('El PDF se ha descargado, pero NO se pudo guardar en Firebase:\n' + err.message);
-      });
 
-      doc.save(fileName);
+      // ====== Generar PDF (solo si se ha pedido) ======
+      let doc = null;
+      if (downloadPdf) {
+        doc = new jsPDF.jsPDF();
+
+        // PDF header
+        doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
+        doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont("helvetica", "bold");
+        doc.text("PROGRAMA DE REFUERZO DEL APRENDIZAJE", 105, 13, { align: "center" });
+        doc.setTextColor(0, 0, 0); doc.setFontSize(11); doc.setFont("helvetica", "normal");
+
+        let y = 35, pageHeight = 280, margin = 14, maxWidth = 180, lineHeight = 7;
+        function checkPageBreak(h) { if (y + h > pageHeight) { doc.addPage(); y = 20; return true; } return false; }
+        function addText(text, isBold = false, customY = null, customMaxWidth = maxWidth) {
+          const currentY = customY !== null ? customY : y;
+          doc.setFont("helvetica", isBold ? "bold" : "normal");
+          const safeText = text ? String(text) : '', lines = doc.splitTextToSize(safeText, customMaxWidth), textHeight = lines.length * lineHeight;
+          if (currentY + textHeight > pageHeight) { doc.addPage(); y = 20; addText(text, isBold, y, customMaxWidth); return y + textHeight + 5; }
+          doc.text(lines, margin, currentY);
+          return currentY + textHeight + 5;
+        }
+        function addSection(title, content) {
+          checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(title, margin, y);
+          doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1);
+          y += 10; y = addText(content || '', false, y); return y;
+        }
+
+        // Datos del alumno (incluye grupo y tutor/a + curso académico)
+        y = addSection(
+          "DATOS DEL ALUMNO/A",
+          `Nombre: ${studentName}\nGrupo: ${group}\nTutor/a: ${tutor}\nTipo de programa: ${programType}\nMaterias: ${uniqueSubjectsWithCourse.join(', ')}\nCurso académico: ${yearId}`
+        );
+        y = addSection("TIPO DE PRA", `${praType}`);
+
+        if (profile === 'profileOption1' || profile === 'profileOption3') {
+          let criteriaText = "";
+          const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
+          Object.keys(groupedCriteria).sort().forEach(course => {
+            Object.keys(groupedCriteria[course]).sort().forEach(subject => {
+              if (profile === 'profileOption3' && course.includes('4')) return;
+              const criteria = groupedCriteria[course][subject];
+              const subjectCode = getSubjectCode(subject, course);
+              const fullSubjectName = getFullSubjectName(subject, course);
+              criteriaText += `${fullSubjectName} (${subjectCode}): ${criteria.map(c => c.code).join(", ")}\n\n`;
+            });
+          });
+          if (criteriaText) {
+            checkPageBreak(20); doc.setFont("helvetica", "bold"); doc.text("CRITERIOS A SUPERAR", margin, y);
+            doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1); y += 8; doc.setFont("helvetica", "normal");
+            const lines = criteriaText.split('\n');
+            lines.forEach(line => { if (line.trim()) { y = addText(line, false, y); y += 2; } });
+          }
+        }
+
+        checkPageBreak(20); doc.setFillColor(220, 252, 231); doc.rect(margin, y-5, 182, 10, 'F');
+        doc.setTextColor(21, 128, 61); doc.setFont("helvetica", "bold"); doc.text("PROPUESTA DE REFUERZO", 105, y+1, { align: "center" });
+        y += 15; doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "normal");
+
+        if (profile === 'profileOption2') {
+          let texto = "El alumno/a cursa TEC4 y repite curso. Se trabajarán todos los criterios de Tecnología 4º.\n\nSe podrán proponer actividades adicionales que desarrollen los criterios:";
+          y = addText(texto);
+          allTEC4Criteria.forEach(id => {
+            checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
+            doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
+            const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
+            if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
+            doc.text(descLines, 35, y); y += descHeight + 4;
+          });
+        } else if (profile === 'profileOption3') {
+          const relatedTEC4 = getRelatedTEC4Criteria(failedCriteria);
+          let texto = "Criterios de Tecnología 4º a reforzar en base a las materias del departamento no superadas.\n\nSe podrán proponer actividades adicionales a lo largo del curso:";
+          y = addText(texto);
+          if (relatedTEC4.length === 0) { y = addText("No se han detectado criterios específicos correlacionados."); }
+          else {
+            relatedTEC4.forEach(id => {
+              checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
+              doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
+              const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
+              if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
+              doc.text(descLines, 35, y); y += descHeight + 4;
+            });
+          }
+        } else {
+          let texto = "El/la alumno/a deberá realizar actividades para superar los criterios no superados del Departamento.\n\nLa entrega se realizará en Classroom del Departamento.\n\nSe proporcionará una evaluación pormenorizada por criterio.";
+          y = addText(texto);
+          const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
+          Object.keys(groupedCriteria).sort().forEach(course => {
+            Object.keys(groupedCriteria[course]).sort().forEach(subject => {
+              checkPageBreak(15);
+              const subjectCode = getSubjectCode(subject, course);
+              const fullSubjectName = getFullSubjectName(subject, course);
+              doc.setFont("helvetica", "bold"); doc.text(`${fullSubjectName} (${subjectCode})`, margin, y); y += 7;
+              const criteria = groupedCriteria[course][subject], codesList = criteria.map(c => c.code).join(", ");
+              checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 180 }); y += lineHeight * 2; y += 5;
+            });
+          });
+        }
+
+        if (Object.keys(selectedAdditionalFields).length > 0) {
+          checkPageBreak(20); y += 10;
+          doc.setFillColor(240, 249, 255); doc.rect(margin, y-5, 182, 10, 'F');
+          doc.setTextColor(37, 99, 235); doc.setFont("helvetica", "bold");
+          doc.text("OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA", 105, y+1, { align: "center" });
+          y += 15; doc.setTextColor(0, 0, 0);
+
+          for (const [section, items] of Object.entries(selectedAdditionalFields)) {
+            checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(section, margin, y); y += 7;
+            if (items.length === 0) { doc.setFont("helvetica", "italic"); y = addText("No se han seleccionado elementos específicos.", false, y); }
+            else {
+              doc.setFont("helvetica", "normal");
+
+              if (section === "TIPO DE ACTIVIDADES Y TAREAS") {
+                if (items.includes("Tareas (precisar)") && textAreaState.tareas) {
+                  checkPageBreak(10); doc.text("Tareas específicas:", margin, y); y += lineHeight;
+                  const lines = textAreaState.tareas.split('\n').filter(l => l.trim());
+                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                  y += 5;
+                }
+                let normal = false;
+                items.forEach(item => {
+                  if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
+                    checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                  }
+                });
+                if (normal) y += 5;
+                if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
+                  checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
+                  const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
+                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                  y += 5;
+                }
+              } else {
+                let normal = false;
+                items.forEach(item => {
+                  if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
+                    checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                  }
+                });
+                if (normal) y += 5;
+                if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
+                  checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
+                  const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
+                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                  y += 5;
+                }
+              }
+            }
+            doc.setDrawColor(200, 200, 200); doc.line(margin, y, 196, y); y += 10;
+          }
+        }
+
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
+          doc.text("Generado automáticamente por ISUStoPRA - Dpto. Tecnología", 105, 290, { align: "center" });
+          doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
+        }
+      }
+
+      // ====== Guardar en Firebase (SIEMPRE, tanto en modo "solo guardado" como "guardar + PDF") ======
+      // Si estamos editando un PRA existente, actualizamos; si no, creamos uno nuevo.
+      const isEditing = !!editingPraRef;
+      savePRAToFirebase(praData, isEditing ? editingPraRef : null).then((result) => {
+        const { yearId: yid, praId } = result || {};
+        const action = isEditing ? 'actualizado' : 'guardado';
+        console.log(`PRA ${action} en Firebase:`, yid, praId);
+        if (downloadPdf) {
+          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nPDF descargándose...`);
+          doc.save(fileName);
+        } else {
+          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nNo se ha descargado el PDF (modo "solo guardado").`);
+        }
+        // Limpiar el flag de edición tras guardar
+        editingPraRef = null;
+        updateEditingBanner();
+      }).catch(err => {
+        console.error('Error guardando PRA en Firebase:', err);
+        const stillDownloaded = downloadPdf;
+        const msg = stillDownloaded
+          ? `El PDF se ha descargado, pero NO se pudo guardar en Firebase:\n${err.message}`
+          : `No se pudo guardar el PRA en Firebase:\n${err.message}`;
+        alert(msg);
+      });
     } catch (error) {
       console.error('Error al generar PRA:', error);
-      alert('Error al generar el PDF: ' + error.message);
+      alert('Error al generar el PRA: ' + error.message);
     }
   }
 
@@ -3302,7 +3480,10 @@
   }
 
   function resetApp() {
-    if (!confirm("¿Estás seguro de que quieres reiniciar todos los datos y comenzar con un nuevo alumno?")) return;
+    const editingMsg = editingPraRef
+      ? 'Estás editando un PRA guardado. "Nuevo alumno" cancelará la edición sin guardar los cambios. '
+      : '';
+    if (!confirm(editingMsg + "¿Estás seguro de que quieres reiniciar todos los datos y comenzar con un nuevo alumno?")) return;
 
     evaluations = [];
     selectedEvaluationIds = [];
@@ -3311,6 +3492,9 @@
     selectedAdditionalFields = {};
     textAreaState = { tareas: '', otros: {} };
     localStorage.removeItem('textAreaState');
+    // Cancelar edición si la estaba haciendo
+    editingPraRef = null;
+    updateEditingBanner();
 
     clearAdditionalTextAreas();
     if (additionalFieldsContainer) additionalFieldsContainer.innerHTML = '';
@@ -3338,6 +3522,9 @@
     selectedAdditionalFields = {};
     textAreaState = { tareas: '', otros: {} };
     localStorage.removeItem('textAreaState');
+    // Cancelar edición
+    editingPraRef = null;
+    updateEditingBanner();
 
     clearAdditionalTextAreas();
     if (additionalFieldsContainer) additionalFieldsContainer.innerHTML = '';
