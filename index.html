@@ -287,11 +287,14 @@
   <div id="authOverlay" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
     <div class="auth-card w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
       <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white p-6 text-center">
-        <!-- Icono representativo: PDF → documento de texto (PRA generado) -->
+        <!-- Icono representativo: documento ISUS → documento PRA generado.
+             Usamos fa-file-arrow-up (PDF de entrada) y fa-file-arrow-down
+             (PRA generado) con una flecha entre medias. Sin texto "PDF"
+             embebido para evitar la confusión con "PNG". -->
         <div class="bg-white/15 inline-flex items-center gap-2 px-4 py-3 rounded-xl mb-3">
-          <i class="fa-solid fa-file-pdf text-2xl"></i>
+          <i class="fa-solid fa-file-arrow-up text-2xl"></i>
           <i class="fa-solid fa-arrow-right text-sm opacity-80"></i>
-          <i class="fa-solid fa-file-lines text-2xl"></i>
+          <i class="fa-solid fa-file-arrow-down text-2xl"></i>
         </div>
         <h2 class="text-xl font-bold">ISUS to PRA V2</h2>
         <p id="authSubtitle" class="text-blue-100 text-sm mt-1">Inicia sesión para continuar</p>
@@ -2309,10 +2312,10 @@
               </p>
             </div>
             <div class="flex items-center gap-1">
-              <button onclick="viewSavedPRA('${yearId}', '${p.id}')" class="text-blue-600 hover:bg-blue-50 p-2 rounded-full" title="Ver / descargar PDF">
+              <button onclick="viewSavedPRA('${yearId}', '${p.id}')" class="text-blue-600 hover:bg-blue-50 p-2 rounded-full" title="Ver contenido del PRA en el asistente">
                 <i class="fa-solid fa-eye"></i>
               </button>
-              ${canDelete ? `<button onclick="editSavedPRA('${yearId}', '${p.id}')" class="text-violet-600 hover:bg-violet-50 p-2 rounded-full" title="Editar"><i class="fa-solid fa-pen"></i></button>` : ''}
+              ${canDelete ? `<button onclick="editSavedPRA('${yearId}', '${p.id}')" class="text-violet-600 hover:bg-violet-50 p-2 rounded-full" title="Editar (modificar y guardar cambios)"><i class="fa-solid fa-pen"></i></button>` : ''}
               ${canDelete ? `<button onclick="deleteSavedPRA('${yearId}', '${p.id}', '${safeName}')" class="text-red-500 hover:bg-red-50 p-2 rounded-full" title="Eliminar"><i class="fa-solid fa-trash-can"></i></button>` : ''}
             </div>
           </div>
@@ -2340,30 +2343,17 @@
     }
   }
 
-  async function viewSavedPRA(yearId, praId) {
-    try {
-      const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras/${praId}`)).get();
-      if (!snap || !snap.exists()) return alert('PRA no encontrado.');
-      const data = snap.val();
-      regeneratePRAPdf(data);
-    } catch (e) {
-      console.error(e);
-      alert('Error al cargar PRA: ' + e.message);
-    }
-  }
-
-  /* ============================================================
-   * EDITAR PRA GUARDADO
-   * ------------------------------------------------------------
-   * Carga los datos del PRA desde Firebase y los restaura en el
-   * asistente (pantallas 1-4) para que el admin pueda modificarlos
-   * y volver a guardar (esta vez como actualización).
-   * ============================================================ */
-  let editingPraRef = null; // { yearId, praId } cuando se está editando
-  let profileManuallySet = false; // Bug 14: si true, renderScreen2 no sobrescribe el perfil
-
-  async function editSavedPRA(yearId, praId) {
-    if (!requireAdmin()) return;
+  /**
+   * Carga un PRA guardado en el asistente (pantallas 1-4).
+   *
+   * @param {string} yearId  - Año académico del PRA.
+   * @param {string} praId   - ID del PRA dentro del año.
+   * @param {boolean} editMode - true: el siguiente "Guardar" actualizará
+   *                              el PRA existente (banner amarillo visible).
+   *                            false: modo visualización; el siguiente
+   *                              "Guardar" creará un PRA nuevo.
+   */
+  async function loadSavedPRAIntoWizard(yearId, praId, editMode) {
     try {
       const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras/${praId}`)).get();
       if (!snap || !snap.exists()) return alert('PRA no encontrado.');
@@ -2372,7 +2362,8 @@
 
       // Confirmar si ya hay un PRA en curso sin guardar
       if (evaluations.length > 0 || Object.keys(selectedAdditionalFields).length > 0) {
-        if (!confirm('Hay datos en curso del PRA actual que se perderán al cargar el PRA guardado. ¿Continuar?')) {
+        const verb = editMode ? 'editar' : 'ver';
+        if (!confirm(`Hay datos en curso del PRA actual que se perderán al cargar el PRA guardado para ${verb}. ¿Continuar?`)) {
           return;
         }
       }
@@ -2393,16 +2384,13 @@
         ? JSON.parse(JSON.stringify(data.selectedAdditionalFields))
         : {};
       // Bug 4 fix: guardar el textAreaState en una variable temporal y
-      // aplicarlo DESPUÉS de goToScreen(1), porque goToScreen hace
-      // saveTextAreaState() si currentScreen === 4, lo cual sobrescribe
-      // el textAreaState que acabamos de restaurar con los valores viejos
-      // del DOM.
+      // aplicarlo DESPUÉS de goToScreen(1).
       const restoredTextAreaState = data.textAreaState
         ? JSON.parse(JSON.stringify(data.textAreaState))
         : { tareas: '', otros: {} };
 
-      // Marcar que estamos editando
-      editingPraRef = { yearId, praId };
+      // Marcar (o no) que estamos editando
+      editingPraRef = editMode ? { yearId, praId } : null;
 
       // Cerrar modal
       closeSavedPrasModal();
@@ -2410,7 +2398,6 @@
       // Forzar currentScreen a 1 antes de goToScreen para que NO ejecute
       // saveTextAreaState() con los textareas viejos todavía en el DOM.
       currentScreen = 1;
-      // Ir a pantalla 1 y restaurar UI
       goToScreen(1);
       updateLoadedEvaluationsUI();
       renderSelectedResults();
@@ -2421,8 +2408,7 @@
       if (g) g.value = data.group || '';
       if (t) t.value = data.tutor || '';
 
-      // Restaurar perfil seleccionado (Bug 14 fix: marcamos un flag para
-      // que renderScreen2 no lo sobrescriba con la autodetección)
+      // Restaurar perfil seleccionado (Bug 14 fix)
       if (data.profile) {
         const radio = document.getElementById(data.profile);
         if (radio) radio.checked = true;
@@ -2435,14 +2421,33 @@
       textAreaState = restoredTextAreaState;
       try { localStorage.setItem('textAreaState', JSON.stringify(textAreaState)); } catch {}
 
-      // Mostrar banner de edición
+      // Mostrar/ocultar banner de edición
       updateEditingBanner();
 
-      alert(`PRA de "${data.studentName || '—'}" cargado para edición.\n\nRealiza los cambios y pulsa "Guardar" o "Guardar + PDF" para actualizar el PRA existente en la nube.\n\nSi pulsas "Nuevo alumno" se cancelará la edición sin guardar.`);
+      // Mensaje informativo según modo
+      if (editMode) {
+        alert(`PRA de "${data.studentName || '—'}" cargado para edición.\n\nRealiza los cambios y pulsa "Guardar" o "Guardar + PDF" para actualizar el PRA existente en la nube.\n\nSi pulsas "Nuevo alumno" se cancelará la edición sin guardar.`);
+      } else {
+        alert(`PRA de "${data.studentName || '—'}" cargado en modo visualización.\n\nPuedes navegar por las pantallas para revisar su contenido.\n\nSi quieres modificarlo y guardar los cambios, usa el icono del bolígrafo (editar) desde "PRAs guardados".\n\nSi pulsas "Guardar" ahora, se creará un PRA NUEVO (no se actualizará este).`);
+      }
     } catch (e) {
-      console.error('Error cargando PRA para edición:', e);
+      console.error('Error cargando PRA:', e);
       alert('Error al cargar PRA: ' + e.message);
     }
+  }
+
+  async function viewSavedPRA(yearId, praId) {
+    // El icono del ojo ahora carga el PRA en el asistente en modo
+    // visualización (sin edición). Si el usuario quiere descargar el
+    // PDF, puede pulsar "Guardar + PDF" después (lo que creará un PRA
+    // nuevo con los mismos datos, o actualizará el existente si está
+    // en modo edición).
+    await loadSavedPRAIntoWizard(yearId, praId, false);
+  }
+
+  async function editSavedPRA(yearId, praId) {
+    if (!requireAdmin()) return;
+    await loadSavedPRAIntoWizard(yearId, praId, true);
   }
 
   function cancelEditPRA() {
@@ -2507,7 +2512,7 @@
       // (editRef.yearId), no el activo actualmente. Si no, el registro
       // acabaría con academicYear = <año activo actual> pero siguiendo
       // alojado bajo courses/<año original>/pras/, lo que es inconsistente
-      // y confundiría a regeneratePRAPdf y al listado de PRAs.
+      // y confundiría al listado de PRAs y a la visualización del PRA.
       const ref = fbDb.ref(fbPath(`courses/${editRef.yearId}/pras/${editRef.praId}`));
       await ref.update({
         ...praData,
@@ -4074,189 +4079,6 @@
     } catch (error) {
       console.error('Error al generar PRA:', error);
       alert('Error al generar el PRA: ' + error.message);
-    }
-  }
-
-  /* ============================================================
-   * REGENERAR PDF DESDE UN PRA GUARDADO
-   * (para usuarios de solo lectura)
-   * ============================================================ */
-  function regeneratePRAPdf(data) {
-    try {
-      // Bug S fix: validar que data es un objeto no nulo antes de proceder.
-      if (!data || typeof data !== 'object') {
-        alert('No se puede regenerar el PDF: datos inválidos.');
-        return;
-      }
-      if (typeof jspdf === 'undefined') { alert('jsPDF no disponible.'); return; }
-      const { jsPDF } = jspdf, doc = new jsPDF();
-      const studentName = data.studentName || 'Desconocido';
-      const group = data.group || '—';
-      const tutor = data.tutor || '—';
-      const profile = data.profile || 'profileOption1';
-      const failedCriteria = data.failedCriteria || [];
-      const selectedAdditionalFields = data.selectedAdditionalFields || {};
-      const textAreaState = data.textAreaState || { tareas: '', otros: {} };
-      const yearId = data.academicYear || getCurrentAcademicYear();
-
-      doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
-      doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont("helvetica", "bold");
-      doc.text("PROGRAMA DE REFUERZO DEL APRENDIZAJE", 105, 13, { align: "center" });
-      doc.setTextColor(0, 0, 0); doc.setFontSize(11); doc.setFont("helvetica", "normal");
-
-      let y = 35, pageHeight = 280, margin = 14, maxWidth = 180, lineHeight = 7;
-      function checkPageBreak(h) { if (y + h > pageHeight) { doc.addPage(); y = 20; return true; } return false; }
-      function addText(text, isBold = false, customY = null, customMaxWidth = maxWidth) {
-        const currentY = customY !== null ? customY : y;
-        doc.setFont("helvetica", isBold ? "bold" : "normal");
-        const safeText = text ? String(text) : '', lines = doc.splitTextToSize(safeText, customMaxWidth), textHeight = lines.length * lineHeight;
-        if (currentY + textHeight > pageHeight) { doc.addPage(); y = 20; addText(text, isBold, y, customMaxWidth); return y + textHeight + 5; }
-        doc.text(lines, margin, currentY);
-        return currentY + textHeight + 5;
-      }
-      function addSection(title, content) {
-        checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(title, margin, y);
-        doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1);
-        y += 10; y = addText(content || '', false, y); return y;
-      }
-
-      y = addSection("DATOS DEL ALUMNO/A",
-        `Nombre: ${studentName}\nGrupo: ${group}\nTutor/a: ${tutor}\nTipo de programa: ${data.programType || '—'}\nMaterias: ${(data.subjects || []).join(', ')}\nCurso académico: ${yearId}`);
-      y = addSection("TIPO DE PRA", data.praType || 'PRA');
-
-      if (profile === 'profileOption1' || profile === 'profileOption3') {
-        const grouped = groupCriteriaByCourseAndSubject(failedCriteria);
-        let criteriaText = "";
-        Object.keys(grouped).sort().forEach(course => {
-          Object.keys(grouped[course]).sort().forEach(subject => {
-            if (profile === 'profileOption3' && course.includes('4')) return;
-            const criteria = grouped[course][subject];
-            const subjectCode = getSubjectCode(subject, course);
-            const fullSubjectName = getFullSubjectName(subject, course);
-            criteriaText += `${fullSubjectName} (${subjectCode}): ${criteria.map(c => c.code).join(", ")}\n\n`;
-          });
-        });
-        if (criteriaText) {
-          checkPageBreak(20); doc.setFont("helvetica", "bold"); doc.text("CRITERIOS A SUPERAR", margin, y);
-          doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1); y += 8; doc.setFont("helvetica", "normal");
-          criteriaText.split('\n').forEach(line => { if (line.trim()) { y = addText(line, false, y); y += 2; } });
-        }
-      }
-
-      // PROPUESTA DE REFUERZO (Bug 1 fix)
-      checkPageBreak(20); doc.setFillColor(220, 252, 231); doc.rect(margin, y-5, 182, 10, 'F');
-      doc.setTextColor(21, 128, 61); doc.setFont("helvetica", "bold"); doc.text("PROPUESTA DE REFUERZO", 105, y+1, { align: "center" });
-      y += 15; doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "normal");
-
-      if (profile === 'profileOption2') {
-        let texto = "El alumno/a cursa TEC4 y repite curso. Se trabajarán todos los criterios de Tecnología 4º.\n\nSe podrán proponer actividades adicionales que desarrollen los criterios:";
-        y = addText(texto);
-        allTEC4Criteria.forEach(id => {
-          checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
-          doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
-          const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
-          if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
-          doc.text(descLines, 35, y); y += descHeight + 4;
-        });
-      } else if (profile === 'profileOption3') {
-        const relatedTEC4 = getRelatedTEC4Criteria(failedCriteria);
-        let texto = "Criterios de Tecnología 4º a reforzar en base a las materias del departamento no superadas.\n\nSe podrán proponer actividades adicionales a lo largo del curso:";
-        y = addText(texto);
-        if (relatedTEC4.length === 0) { y = addText("No se han detectado criterios específicos correlacionados."); }
-        else {
-          relatedTEC4.forEach(id => {
-            checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
-            doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
-            const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
-            if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
-            doc.text(descLines, 35, y); y += descHeight + 4;
-          });
-        }
-      } else {
-        let texto = "El/la alumno/a deberá realizar actividades para superar los criterios no superados del Departamento.\n\nLa entrega se realizará en Classroom del Departamento.\n\nSe proporcionará una evaluación pormenorizada por criterio.";
-        y = addText(texto);
-        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
-        Object.keys(groupedCriteria).sort().forEach(course => {
-          Object.keys(groupedCriteria[course]).sort().forEach(subject => {
-            checkPageBreak(15);
-            const subjectCode = getSubjectCode(subject, course);
-            const fullSubjectName = getFullSubjectName(subject, course);
-            doc.setFont("helvetica", "bold"); doc.text(`${fullSubjectName} (${subjectCode})`, margin, y); y += 7;
-            const criteria = groupedCriteria[course][subject], codesList = criteria.map(c => c.code).join(", ");
-            checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 180 }); y += lineHeight * 2; y += 5;
-          });
-        });
-      }
-
-      // OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA (Bug 1 fix)
-      if (Object.keys(selectedAdditionalFields).length > 0) {
-        checkPageBreak(20); y += 10;
-        doc.setFillColor(240, 249, 255); doc.rect(margin, y-5, 182, 10, 'F');
-        doc.setTextColor(37, 99, 235); doc.setFont("helvetica", "bold");
-        doc.text("OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA", 105, y+1, { align: "center" });
-        y += 15; doc.setTextColor(0, 0, 0);
-
-        for (const [section, items] of Object.entries(selectedAdditionalFields)) {
-          checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(section, margin, y); y += 7;
-          if (items.length === 0) { doc.setFont("helvetica", "italic"); y = addText("No se han seleccionado elementos específicos.", false, y); }
-          else {
-            doc.setFont("helvetica", "normal");
-            if (section === "TIPO DE ACTIVIDADES Y TAREAS") {
-              if (items.includes("Tareas (precisar)") && textAreaState.tareas) {
-                checkPageBreak(10); doc.text("Tareas específicas:", margin, y); y += lineHeight;
-                const lines = textAreaState.tareas.split('\n').filter(l => l.trim());
-                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
-                y += 5;
-              }
-              let normal = false;
-              items.forEach(item => {
-                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
-                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
-                }
-              });
-              if (normal) y += 5;
-              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
-                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
-                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
-                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
-                y += 5;
-              }
-            } else {
-              let normal = false;
-              items.forEach(item => {
-                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
-                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
-                }
-              });
-              if (normal) y += 5;
-              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
-                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
-                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
-                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
-                y += 5;
-              }
-            }
-          }
-          doc.setDrawColor(200, 200, 200); doc.line(margin, y, 196, y); y += 10;
-        }
-      }
-
-      // Footer (Bug 1 fix)
-      const pageCount = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
-        doc.text("Generado automáticamente por ISUStoPRA - Dpto. Tecnología", 105, 290, { align: "center" });
-        doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
-      }
-
-      // Formato del PDF regenerado: PRA_Apellido1Apellido2Nombre_AAAA-AAAA.pdf
-      // (sin materia porque al regenerar no siempre la sabemos; sí el año)
-      const studentCamel = formatStudentNameCamel(studentName);
-      const outName = `PRA_${studentCamel}_${yearId}.pdf`;
-      doc.save(outName);
-    } catch (e) {
-      console.error('Error regenerando PDF:', e);
-      alert('Error al regenerar PDF: ' + e.message);
     }
   }
 
