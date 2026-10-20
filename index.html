@@ -3926,30 +3926,39 @@
           return;
         }
 
-        // Tras guardar, limpiar el flag de edición SIEMPRE para que
-        // el siguiente "Guardar" no intente actualizar un PRA que
-        // ya no está en modo edición.
-        editingPraRef = null;
+        // Bug fix (duplicados al editar+guardar):
+        // - Si estábamos editando (update), MANTENER editingPraRef apuntando
+        //   al mismo PRA. Así, si el usuario vuelve a pulsar "Guardar",
+        //   se hará OTRO update (no un create). El usuario puede seguir
+        //   editando el mismo PRA sin riesgo de duplicar.
+        // - Si fue un create nuevo, TRANSICIONAR a modo edición sobre el
+        //   PRA recién creado (mismo motivo: evitar duplicados si el
+        //   usuario pulsa "Guardar" otra vez).
+        if (yid && praId) {
+          editingPraRef = { yearId: yid, praId: praId };
+        } else {
+          editingPraRef = null;
+        }
         updateEditingBanner();
 
-        // Preguntar al usuario qué quiere hacer ahora para evitar
-        // duplicados por accidente (Bug: si el usuario pulsa "Guardar"
-        // otra vez sin pulsar "Nuevo alumno", crearía un duplicado).
-        const msg = downloadPdf
-          ? `PRA ${action} correctamente en la nube (${yid}) y PDF descargado.\n\n¿Quieres empezar con un nuevo alumno ahora?`
-          : `PRA ${action} correctamente en la nube (${yid}).\n\n¿Quieres empezar con un nuevo alumno ahora?`;
-        if (confirm(msg)) {
-          resetApp();
-        } else {
-          // El usuario decide seguir con los datos en pantalla.
-          // Si vuelve a pulsar "Guardar", se creará un PRA NUEVO
-          // (no actualizará el anterior, porque editingPraRef ya es null).
-          // Le avisamos de esto.
-          if (downloadPdf) {
-            // Si descargó PDF, no hace falta otro alert (ya sabe que terminó)
-          } else {
-            console.info('[savePRA] Datos del PRA siguen en pantalla. El próximo "Guardar" creará un PRA nuevo.');
+        // Bug fix: tras un guardado, refrescar el cache de PRAs del año
+        // desde Firebase para que la lista muestre la versión actualizada
+        // y no haya duplicados visuales ni caché obsoleto.
+        if (yid) {
+          delete savedPrasCache[yid];
+          const savedPrasModal = document.getElementById('savedPrasModal');
+          if (savedPrasModal && !savedPrasModal.classList.contains('hidden')) {
+            console.log('[savePRA] Modal de PRAs guardados abierto: refrescando lista...');
+            loadSavedPrasYears(true);
           }
+        }
+
+        // Mensaje informativo (sin preguntar; el usuario decide con
+        // "Nuevo alumno" cuando quiera empezar de cero).
+        if (downloadPdf) {
+          alert(`PRA ${action} correctamente en la nube (${yid}) y PDF descargado.\n\nPuedes seguir editando este PRA (cualquier "Guardar" siguiente actualizará la misma entrada) o pulsar "Nuevo alumno" para empezar de cero.`);
+        } else {
+          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nPuedes seguir editando este PRA (cualquier "Guardar" siguiente actualizará la misma entrada) o pulsar "Nuevo alumno" para empezar de cero.`);
         }
       }).catch(err => {
         console.error('Error guardando PRA en Firebase:', err);
