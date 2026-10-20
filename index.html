@@ -1984,29 +1984,19 @@
       console.error('Error creando usuario:', e);
       // Bug fix: si el error es "email-already-in-use", el usuario ya
       // existe en Firebase Auth pero puede que su metadata no esté en
-      // la BD (por un fallo anterior). En ese caso, ofrecemos
-      // "recuperar" la metadata iniciando sesión con la contraseña
-      // proporcionada y escribiendo la metadata.
+      // la BD (por un fallo anterior), o que tenga metadata con un
+      // username distinto. La forma fiable de arreglarlo es iniciar
+      // sesión con la contraseña proporcionada: si funciona, obtenemos
+      // el UID real y escribimos la metadata correcta.
       if (e.code === 'auth/email-already-in-use') {
         const email = usernameToEmail(username);
-        // Comprobar si el usuario huérfano ya tiene metadata en la BD
-        // (en cuyo caso sí existe de verdad y no hay nada que hacer).
-        // Para ello necesitamos su UID. Como no podemos listar usuarios
-        // de Auth desde el cliente, hacemos una segunda aproximación:
-        // buscar en la BD si hay algún users/{uid} con username = username.
-        const snapUsers = await fbDb.ref(fbPath('users')).orderByChild('username').equalTo(username).get();
-        if (snapUsers && snapUsers.exists()) {
-          // El usuario SÍ tiene metadata → realmente ya existe.
-          setAuthError(errEl, `El usuario "${username}" ya existe. Usa otro nombre.`);
-          return;
-        }
-        // El usuario está en Auth pero NO en la BD → huérfano. Ofrecer
-        // recuperarlo iniciando sesión y escribiendo su metadata.
-        if (confirm(`El usuario "${username}" ya existe en Firebase Auth pero no tiene metadata en la base de datos (probablemente por un fallo anterior).\n\n¿Quieres recuperar este usuario iniciando sesión con la contraseña proporcionada y escribiendo su metadata ahora?`)) {
+        // Intentar recuperar: iniciar sesión con la contraseña proporcionada.
+        if (confirm(`El usuario "${username}" ya existe en Firebase Auth.\n\n¿Quieres recuperar este usuario? Se iniciará sesión temporalmente con la contraseña proporcionada y se escribirá su metadata en la base de datos (si no la tenía o estaba corrupta).`)) {
           try {
             const recoveryAuth = secondaryApp.auth();
             const cred2 = await recoveryAuth.signInWithEmailAndPassword(email, p1);
             const orphanUid = cred2.user.uid;
+            // Escribir (o sobrescribir) la metadata con los datos correctos.
             await fbDb.ref(fbPath(`users/${orphanUid}`)).set({
               username: username,
               role: role,
@@ -2025,11 +2015,16 @@
             return;
           } catch (recoveryErr) {
             console.error('Error recuperando usuario huérfano:', recoveryErr);
-            setAuthError(errEl, `No se pudo recuperar el usuario: ${translateFirebaseError(recoveryErr)}.\n\nLa contraseña proporcionada no coincide con la del usuario existente en Auth. Si no la recuerdas, borra el usuario desde la consola de Firebase (Authentication → Users) y vuelve a intentarlo.`);
+            const code = recoveryErr.code || '';
+            if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/user-not-found') {
+              setAuthError(errEl, `No se pudo recuperar el usuario: la contraseña proporcionada no coincide con la del usuario existente en Auth.\n\nSi no la recuerdas, borra el usuario desde la consola de Firebase (Authentication → Users → Delete) y vuelve a intentarlo.`);
+            } else {
+              setAuthError(errEl, `No se pudo recuperar el usuario: ${translateFirebaseError(recoveryErr)}`);
+            }
             return;
           }
         } else {
-          setAuthError(errEl, `Operación cancelada. El usuario "${username}" sigue existiendo en Auth sin metadata. Si quieres eliminarlo del todo, usa la consola de Firebase (Authentication → Users → Delete).`);
+          setAuthError(errEl, `Operación cancelada. El usuario "${username}" sigue existiendo en Auth. Si quieres eliminarlo del todo, usa la consola de Firebase (Authentication → Users → Delete).`);
           return;
         }
       }
@@ -3714,7 +3709,7 @@
       // ====== Generar PDF (solo si se ha pedido) ======
       let doc = null;
       if (downloadPdf) {
-        doc = new jsPDF.jsPDF();
+        doc = new jspdf.jsPDF();
 
         // PDF header
         doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
