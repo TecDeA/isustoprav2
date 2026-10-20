@@ -1111,6 +1111,12 @@
   let savedPrasCache = {};       // { yearId: [pra, ...] }
   let usersCache = {};           // { uid: { username, role, ... } }
 
+  // Variables de estado de edición de PRA (declaradas aquí al inicio
+  // para que estén disponibles desde cualquier función, incluyendo
+  // viewSavedPRA/editSavedPRA/loadSavedPRAIntoWizard y applyRoleUI).
+  let editingPraRef = null;      // { yearId, praId } cuando se está editando
+  let profileManuallySet = false; // si true, renderScreen2 no sobrescribe el perfil
+
   /* ============================================================
    * CURSO ACADÉMICO (1 sep – 31 ago)
    * ============================================================ */
@@ -1418,9 +1424,9 @@
         // si no, otro admin que entre después podría sobrescribir el
         // PRA que estábamos editando sin saberlo.
         editingPraRef = null;
-        if (typeof updateEditingBanner === 'function') updateEditingBanner();
+        updateEditingBanner();
         // Limpiar también el flag de perfil manualmente seteado
-        if (typeof profileManuallySet !== 'undefined') profileManuallySet = false;
+        profileManuallySet = false;
         adminInitialized = await checkAdminInitialized();
         showAuthOverlay(adminInitialized ? 'login' : 'setup');
       }
