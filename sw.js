@@ -10,7 +10,7 @@
 
 // === VERSIÓN DE LA APLICACIÓN ===
 // Bump de este valor en cada release; el chip del header lo mostrará.
-const APP_VERSION = 'v1.2.0-20261021';
+const APP_VERSION = 'v1.3.0';
 const CACHE_NAME = `isustopra-${APP_VERSION}`;
 const PRECACHE = [
   './',
