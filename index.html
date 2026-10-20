@@ -173,6 +173,16 @@
     @media (prefers-color-scheme: dark) {
       .dark-mode-compatible { background-color: #111827; color: #e5e7eb; }
       body { background: linear-gradient(180deg, #0b1020, #0b1020) !important; }
+      /* Inputs, textareas y selects SIEMPRE con fondo blanco para legibilidad,
+         incluso en modo oscuro (los modales son blancos). */
+      input, textarea, select {
+        background-color: #ffffff !important;
+        color: #1e293b !important;
+      }
+      /* Placeholders legibles */
+      input::placeholder, textarea::placeholder { color: #94a3b8 !important; }
+      /* El select también debe mostrar opciones con fondo blanco */
+      select option { background-color: #ffffff; color: #1e293b; }
     }
 
     #appVersionChip { transition: background-color .2s ease, transform .15s ease; }
@@ -336,6 +346,9 @@
               <button onclick="openSavedPrasModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
                 <i class="fa-solid fa-folder-open text-blue-600 w-5"></i> PRAs guardados
               </button>
+              <button id="courseMgmtMenuBtn" onclick="openCourseMgmtModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
+                <i class="fa-solid fa-calendar-days text-emerald-600 w-5"></i> Gestión de cursos
+              </button>
               <button id="userMgmtMenuBtn" onclick="openUserManagementModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
                 <i class="fa-solid fa-users-gear text-violet-600 w-5"></i> Gestión de usuarios
               </button>
@@ -432,6 +445,98 @@
         <div id="savedPrasList" class="space-y-2">
           <div class="text-center text-slate-400 text-sm py-6">Selecciona un curso para ver los PRAs guardados.</div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       COURSE MANAGEMENT MODAL (admin: full CRUD; user: read-only)
+       ============================================================= -->
+  <div id="courseMgmtModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-4 rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+        <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-calendar-days"></i> Gestión de cursos académicos</h2>
+        <button onclick="closeCourseMgmtModal()" class="text-white hover:text-emerald-200 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="p-6 space-y-6">
+
+        <!-- Curso vigente actual -->
+        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+          <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-1">Curso vigente actual</p>
+          <p id="courseMgmtCurrent" class="text-lg font-bold text-emerald-900">—</p>
+          <p id="courseMgmtCurrentDates" class="text-xs text-emerald-700 mt-1">—</p>
+        </div>
+
+        <!-- Crear nuevo curso (solo admin) -->
+        <div id="courseMgmtCreateSection" class="bg-slate-50 border border-slate-200 rounded-xl p-4 hidden">
+          <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-emerald-600"></i> Crear nuevo curso</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Identificador *</label>
+              <input id="newCourseYearId" type="text" pattern="\d{4}-\d{4}" placeholder="2027-2028" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" />
+              <p class="text-[11px] text-slate-400 mt-1">Formato AAAA-AAAA (ej. 2027-2028)</p>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Etiqueta (opcional)</label>
+              <input id="newCourseLabel" type="text" placeholder="Curso 2027-2028" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha de inicio *</label>
+              <input id="newCourseStart" type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha de fin *</label>
+              <input id="newCourseEnd" type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" />
+            </div>
+          </div>
+          <div id="newCourseError" class="hidden mt-3 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
+            <i class="fa-solid fa-circle-exclamation"></i><span></span>
+          </div>
+          <button onclick="adminCreateCourse()" class="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-calendar-plus"></i> Crear curso
+          </button>
+        </div>
+
+        <!-- Lista de cursos -->
+        <div>
+          <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-list text-slate-600"></i> Cursos existentes</h3>
+          <div id="coursesList" class="space-y-2">
+            <div class="text-center text-slate-400 text-sm py-6">
+              <div class="loader mx-auto mb-2"></div>
+              Cargando cursos…
+            </div>
+          </div>
+        </div>
+
+        <!-- Editar curso (solo futuros) -->
+        <div id="courseMgmtEditSection" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-pen text-blue-600"></i> Editar curso <span id="editCourseBadge" class="text-xs font-mono bg-blue-100 text-blue-700 px-2 py-0.5 rounded"></span></h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Etiqueta</label>
+              <input id="editCourseLabel" type="text" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+            </div>
+            <div></div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha de inicio</label>
+              <input id="editCourseStart" type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha de fin</label>
+              <input id="editCourseEnd" type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+            </div>
+          </div>
+          <div id="editCourseError" class="hidden mt-3 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
+            <i class="fa-solid fa-circle-exclamation"></i><span></span>
+          </div>
+          <div class="mt-3 flex gap-2">
+            <button onclick="adminSaveCourse()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+              <i class="fa-solid fa-save"></i> Guardar cambios
+            </button>
+            <button onclick="cancelEditCourse()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-semibold">Cancelar</button>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -937,6 +1042,7 @@
   const userMenuRoleLbl    = document.getElementById('userMenuRoleLbl');
   const userMenu           = document.getElementById('userMenu');
   const userMgmtMenuBtn    = document.getElementById('userMgmtMenuBtn');
+  const courseMgmtMenuBtn  = document.getElementById('courseMgmtMenuBtn');
   const courseChip         = document.getElementById('courseChip');
   const courseChipText     = document.getElementById('courseChipText');
   const studentCourseLabel = document.getElementById('studentCourseLabel');
@@ -1104,6 +1210,8 @@
 
           applyRoleUI();
           hideAuthOverlay();
+          // Cargar el curso académico activo desde Firebase (con fallback automático)
+          await loadActiveAcademicYear();
           refreshCourseChip();
         } catch (e) {
           console.error('Error cargando metadata de usuario:', e);
@@ -1133,6 +1241,10 @@
     userMenuRole.textContent = currentUser.role;
     userMenuRoleLbl.textContent = roleLbl;
 
+    // Botones de gestión: visibles para todos, pero las acciones dentro
+    // del modal requieren admin (requireAdmin()).
+    if (courseMgmtMenuBtn) courseMgmtMenuBtn.classList.remove('hidden');
+
     if (currentUser.role === 'admin') {
       userMgmtMenuBtn.classList.remove('hidden');
       // Asegurar que se ven los botones de generación (por si volvemos de un rol user)
@@ -1150,7 +1262,7 @@
   }
 
   function refreshCourseChip() {
-    const yid = getCurrentAcademicYear();
+    const yid = getActiveAcademicYear();
     courseChipText.textContent = yid;
     courseChip.classList.remove('hidden');
     if (studentCourseLabel) studentCourseLabel.value = yid;
@@ -1162,6 +1274,431 @@
       return false;
     }
     return true;
+  }
+
+  /* ============================================================
+   * GESTIÓN DE CURSOS ACADÉMICOS
+   * ------------------------------------------------------------
+   * Modelo en Firebase:
+   *   isustopra/
+   *     meta/
+   *       adminInitialized: true
+   *       currentAcademicYear: "2026-2027"     ← curso vigente seleccionable
+   *     courses/
+   *       {yearId}/
+   *         meta/
+   *           yearId:     "2026-2027"
+   *           label:      "Curso 2026-2027"    (opcional)
+   *           startDate:  "2026-09-01"         (ISO date)
+   *           endDate:    "2027-08-31"
+   *           createdAt:  timestamp
+   *           createdBy:  uid
+   *         pras/
+   *           {praId}/...
+   *
+   * Reglas de negocio:
+   *   - Vigente:  startDate <= hoy <= endDate
+   *   - Vencido:  endDate < hoy
+   *   - Futuro:   startDate > hoy
+   *   - Solo se pueden EDITAR o ELIMINAR cursos FUTUROS.
+   *   - No se puede eliminar el curso marcado como vigente (currentAcademicYear).
+   *   - "Cambiar" = cambiar currentAcademicYear a otro yearId existente.
+   * ============================================================ */
+
+  let activeAcademicYear = null;  // valor cacheado de meta/currentAcademicYear
+  let coursesCache = {};          // { yearId: { yearId, label, startDate, endDate, ... } }
+  let editingCourseYearId = null; // año en edición
+
+  /** Devuelve el año académico ACTIVO (de Firebase) o, si no se ha cargado
+   *  todavía, el calculado automáticamente. */
+  function getActiveAcademicYear() {
+    if (activeAcademicYear) return activeAcademicYear;
+    return getCurrentAcademicYear();
+  }
+
+  /** Carga desde Firebase qué yearId es el vigente. Si no hay ninguno
+   *  definido, usa el cálculo automático y lo persiste para que exista. */
+  async function loadActiveAcademicYear() {
+    if (!fbDb) return;
+    try {
+      const snap = await fbDb.ref(fbPath('meta/currentAcademicYear')).get();
+      if (snap && snap.exists()) {
+        activeAcademicYear = snap.val();
+      } else {
+        // Primer arranque: usar el cálculo automático y persistirlo.
+        const auto = getCurrentAcademicYear();
+        try {
+          await fbDb.ref(fbPath('meta/currentAcademicYear')).set(auto);
+          activeAcademicYear = auto;
+        } catch (e) {
+          // Si las reglas no permiten escribir, usamos el valor en memoria.
+          activeAcademicYear = auto;
+        }
+      }
+      refreshCourseChip();
+    } catch (e) {
+      console.warn('No se pudo leer meta/currentAcademicYear:', e);
+      activeAcademicYear = getCurrentAcademicYear();
+      refreshCourseChip();
+    }
+  }
+
+  /** Devuelve el estado de un curso dadas sus fechas. */
+  function getCourseStatus(course) {
+    if (!course || !course.startDate || !course.endDate) return 'unknown';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(course.startDate + 'T00:00:00');
+    const end = new Date(course.endDate + 'T23:59:59');
+    if (today < start) return 'future';
+    if (today > end) return 'past';
+    return 'current';
+  }
+
+  /* ----- Modal: abrir / cerrar ----- */
+  function openCourseMgmtModal() {
+    document.getElementById('courseMgmtModal').classList.remove('hidden');
+    userMenu.classList.add('hidden-menu');
+    // Mostrar/ocultar sección de crear según rol
+    const createSection = document.getElementById('courseMgmtCreateSection');
+    if (createSection) {
+      createSection.classList.toggle('hidden', !(currentUser && currentUser.role === 'admin'));
+    }
+    // Resetear formulario de crear
+    document.getElementById('newCourseYearId').value = '';
+    document.getElementById('newCourseLabel').value = '';
+    // Por defecto: 1 sep - 31 ago del próximo año académico
+    const next = nextAcademicYearId();
+    const [y1, y2] = next.split('-');
+    document.getElementById('newCourseStart').value = `${y1}-09-01`;
+    document.getElementById('newCourseEnd').value = `${y2}-08-31`;
+    clearAuthError(document.getElementById('newCourseError'));
+    // Ocultar edición
+    cancelEditCourse();
+    // Cargar listado
+    adminListCourses();
+    // Cargar curso vigente
+    refreshCourseMgmtCurrent();
+  }
+  function closeCourseMgmtModal() {
+    document.getElementById('courseMgmtModal').classList.add('hidden');
+    cancelEditCourse();
+  }
+
+  function nextAcademicYearId() {
+    // Calcula el próximo yearId que no exista aún.
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = today.getMonth();
+    let next;
+    if (m >= 8) next = `${y + 1}-${y + 2}`;
+    else next = `${y}-${y + 1}`;
+    return next;
+  }
+
+  async function refreshCourseMgmtCurrent() {
+    const lbl = document.getElementById('courseMgmtCurrent');
+    const dates = document.getElementById('courseMgmtCurrentDates');
+    if (!lbl || !dates) return;
+    await loadActiveAcademicYear();
+    const yid = getActiveAcademicYear();
+    lbl.textContent = yid;
+    // Buscar meta del curso
+    let meta = coursesCache[yid];
+    if (!meta) {
+      try {
+        const snap = await fbDb.ref(fbPath(`courses/${yid}/meta`)).get();
+        if (snap && snap.exists()) {
+          meta = snap.val();
+          coursesCache[yid] = meta;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    if (meta && meta.startDate && meta.endDate) {
+      dates.textContent = `${meta.startDate} → ${meta.endDate}` +
+        (meta.label ? ` · ${meta.label}` : '');
+    } else {
+      // Curso automático (sin meta explícita): mostrar fechas calculadas
+      const [y1, y2] = yid.split('-');
+      dates.textContent = `${y1}-09-01 → ${y2}-08-31 (automático)`;
+    }
+  }
+
+  /* ----- Listar cursos ----- */
+  async function adminListCourses() {
+    const list = document.getElementById('coursesList');
+    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando cursos…</div>';
+    try {
+      const snap = await fbDb.ref(fbPath('courses')).get();
+      const courses = [];
+      if (snap && snap.exists()) {
+        snap.forEach(yearChild => {
+          const yearId = yearChild.key;
+          const meta = yearChild.val().meta || {};
+          courses.push({
+            yearId,
+            label: meta.label || '',
+            startDate: meta.startDate || '',
+            endDate: meta.endDate || '',
+            createdAt: meta.createdAt || 0,
+            prasCount: (yearChild.val().pras && typeof yearChild.val().pras === 'object')
+              ? Object.keys(yearChild.val().pras).length : 0
+          });
+        });
+      }
+      // Asegurar que el curso activo actual está en la lista aunque no tenga meta
+      const activeYid = getActiveAcademicYear();
+      if (!courses.find(c => c.yearId === activeYid)) {
+        const [y1, y2] = activeYid.split('-');
+        courses.push({
+          yearId: activeYid,
+          label: '',
+          startDate: `${y1}-09-01`,
+          endDate: `${y2}-08-31`,
+          createdAt: 0,
+          prasCount: 0,
+          auto: true
+        });
+      }
+      coursesCache = {};
+      courses.forEach(c => coursesCache[c.yearId] = c);
+      courses.sort((a, b) => a.yearId.localeCompare(b.yearId));
+
+      if (courses.length === 0) {
+        list.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">No hay cursos definidos.</p>';
+        return;
+      }
+
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      const activeYidFinal = getActiveAcademicYear();
+      list.innerHTML = courses.map(c => {
+        const status = getCourseStatus(c);
+        const isActive = c.yearId === activeYidFinal;
+        const statusInfo = {
+          current: { label: 'Vigente', color: 'bg-emerald-100 text-emerald-700' },
+          past:    { label: 'Vencido',  color: 'bg-slate-200 text-slate-600' },
+          future:  { label: 'Futuro',   color: 'bg-blue-100 text-blue-700' },
+          unknown: { label: '—',        color: 'bg-slate-100 text-slate-500' }
+        }[status] || { label: '—', color: 'bg-slate-100 text-slate-500' };
+
+        const dateStr = c.startDate && c.endDate
+          ? `${c.startDate} → ${c.endDate}`
+          : 'Fechas automáticas (1 sep – 31 ago)';
+        const labelStr = c.label ? ` · ${c.label}` : '';
+        const prasStr = c.prasCount > 0 ? ` · ${c.prasCount} PRA(s)` : '';
+        const autoStr = c.auto ? ' · <span class="italic">automático</span>' : '';
+
+        // Botones:
+        //  - Editar: solo admin y solo si future
+        //  - Eliminar: solo admin, solo si future, y NO es el activo
+        //  - Activar (cambiar vigente): solo admin, y solo si NO es el activo actual
+        const canEdit = isAdmin && status === 'future';
+        const canDelete = isAdmin && status === 'future' && !isActive;
+        const canActivate = isAdmin && !isActive;
+
+        return `
+          <div class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:shadow-sm transition ${isActive ? 'ring-2 ring-emerald-400' : ''}">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="font-semibold text-slate-800 truncate font-mono">${c.yearId}</p>
+                <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded ${statusInfo.color}">${statusInfo.label}</span>
+                ${isActive ? '<span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-emerald-600 text-white">Activo</span>' : ''}
+              </div>
+              <p class="text-xs text-slate-500 mt-0.5">
+                <i class="fa-solid fa-calendar mr-1"></i>${dateStr}${labelStr}${prasStr}${autoStr}
+              </p>
+            </div>
+            <div class="flex items-center gap-1">
+              ${canActivate ? `<button onclick="adminSetActiveCourse('${c.yearId}')" class="text-emerald-600 hover:bg-emerald-50 p-2 rounded-full" title="Marcar como vigente"><i class="fa-solid fa-circle-check"></i></button>` : ''}
+              ${canEdit ? `<button onclick="adminEditCourse('${c.yearId}')" class="text-blue-600 hover:bg-blue-50 p-2 rounded-full" title="Editar"><i class="fa-solid fa-pen"></i></button>` : ''}
+              ${canDelete ? `<button onclick="adminDeleteCourse('${c.yearId}')" class="text-red-500 hover:bg-red-50 p-2 rounded-full" title="Eliminar"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+              ${!isAdmin ? '<span class="text-xs text-slate-400 italic px-2">(solo lectura)</span>' : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error('Error listando cursos:', e);
+      list.innerHTML = `<p class="text-center text-red-500 text-sm py-4">Error: ${e.message}</p>`;
+    }
+  }
+
+  /* ----- Crear curso ----- */
+  async function adminCreateCourse() {
+    if (!requireAdmin()) return;
+    const errEl = document.getElementById('newCourseError');
+    clearAuthError(errEl);
+
+    const yearId = (document.getElementById('newCourseYearId').value || '').trim();
+    const label  = (document.getElementById('newCourseLabel').value || '').trim();
+    const startDate = document.getElementById('newCourseStart').value || '';
+    const endDate   = document.getElementById('newCourseEnd').value || '';
+
+    if (!yearId) return setAuthError(errEl, 'Indica un identificador (ej. 2027-2028).');
+    if (!/^\d{4}-\d{4}$/.test(yearId)) return setAuthError(errEl, 'Formato inválido. Usa AAAA-AAAA (ej. 2027-2028).');
+    const [y1, y2] = yearId.split('-').map(Number);
+    if (y2 !== y1 + 1) return setAuthError(errEl, 'El segundo año debe ser el primero + 1.');
+    if (!startDate) return setAuthError(errEl, 'Indica la fecha de inicio.');
+    if (!endDate) return setAuthError(errEl, 'Indica la fecha de fin.');
+    const s = new Date(startDate + 'T00:00:00');
+    const e = new Date(endDate + 'T23:59:59');
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return setAuthError(errEl, 'Fechas inválidas.');
+    if (e <= s) return setAuthError(errEl, 'La fecha de fin debe ser posterior a la de inicio.');
+
+    // Comprobar que no existe ya
+    try {
+      const existing = await fbDb.ref(fbPath(`courses/${yearId}/meta`)).get();
+      if (existing && existing.exists()) {
+        return setAuthError(errEl, `El curso ${yearId} ya existe.`);
+      }
+    } catch (e) {
+      return setAuthError(errEl, 'No se pudo verificar si el curso existe: ' + e.message);
+    }
+
+    try {
+      await fbDb.ref(fbPath(`courses/${yearId}/meta`)).set({
+        yearId,
+        label,
+        startDate,
+        endDate,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        createdBy: currentUser.uid
+      });
+      // Limpiar form
+      document.getElementById('newCourseYearId').value = '';
+      document.getElementById('newCourseLabel').value = '';
+      // Recargar
+      await adminListCourses();
+      await refreshCourseMgmtCurrent();
+      alert(`Curso ${yearId} creado correctamente.`);
+    } catch (e) {
+      console.error('Error creando curso:', e);
+      setAuthError(errEl, translateFirebaseError(e));
+    }
+  }
+
+  /* ----- Editar curso ----- */
+  function adminEditCourse(yearId) {
+    if (!requireAdmin()) return;
+    const c = coursesCache[yearId];
+    if (!c) return alert('Curso no encontrado en caché. Recarga la lista.');
+    const status = getCourseStatus(c);
+    if (status !== 'future') {
+      alert('Solo se pueden editar cursos futuros (que aún no hayan empezado).');
+      return;
+    }
+    editingCourseYearId = yearId;
+    const section = document.getElementById('courseMgmtEditSection');
+    const badge = document.getElementById('editCourseBadge');
+    badge.textContent = yearId;
+    document.getElementById('editCourseLabel').value = c.label || '';
+    document.getElementById('editCourseStart').value = c.startDate || '';
+    document.getElementById('editCourseEnd').value = c.endDate || '';
+    clearAuthError(document.getElementById('editCourseError'));
+    section.classList.remove('hidden');
+    section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function cancelEditCourse() {
+    editingCourseYearId = null;
+    const section = document.getElementById('courseMgmtEditSection');
+    if (section) section.classList.add('hidden');
+    clearAuthError(document.getElementById('editCourseError'));
+  }
+
+  async function adminSaveCourse() {
+    if (!requireAdmin()) return;
+    if (!editingCourseYearId) return;
+    const errEl = document.getElementById('editCourseError');
+    clearAuthError(errEl);
+
+    const label = (document.getElementById('editCourseLabel').value || '').trim();
+    const startDate = document.getElementById('editCourseStart').value || '';
+    const endDate   = document.getElementById('editCourseEnd').value || '';
+
+    if (!startDate) return setAuthError(errEl, 'Indica la fecha de inicio.');
+    if (!endDate) return setAuthError(errEl, 'Indica la fecha de fin.');
+    const s = new Date(startDate + 'T00:00:00');
+    const e = new Date(endDate + 'T23:59:59');
+    if (e <= s) return setAuthError(errEl, 'La fecha de fin debe ser posterior a la de inicio.');
+
+    // Re-verificar que sigue siendo future (no han cambiado las condiciones)
+    const c = coursesCache[editingCourseYearId];
+    if (c) {
+      const status = getCourseStatus(c);
+      if (status !== 'future') {
+        return setAuthError(errEl, 'El curso ya no es futuro (puede que haya empezado). No se puede editar.');
+      }
+    }
+    // Si las nuevas fechas hacen que el curso sea vigente o pasado, advertir
+    const newStatus = getCourseStatus({ startDate, endDate });
+    if (newStatus !== 'future') {
+      return setAuthError(errEl, 'Las nuevas fechas hacen que el curso no sea futuro. Solo se pueden editar cursos futuros.');
+    }
+
+    try {
+      await fbDb.ref(fbPath(`courses/${editingCourseYearId}/meta`)).update({
+        label, startDate, endDate
+      });
+      cancelEditCourse();
+      await adminListCourses();
+      await refreshCourseMgmtCurrent();
+      alert(`Curso ${editingCourseYearId} actualizado.`);
+    } catch (e) {
+      console.error('Error guardando curso:', e);
+      setAuthError(errEl, translateFirebaseError(e));
+    }
+  }
+
+  /* ----- Eliminar curso (solo futuro) ----- */
+  async function adminDeleteCourse(yearId) {
+    if (!requireAdmin()) return;
+    const c = coursesCache[yearId];
+    if (!c) return alert('Curso no encontrado. Recarga la lista.');
+    const status = getCourseStatus(c);
+    if (status !== 'future') {
+      alert('No se puede eliminar: no es un curso futuro.\n\nSolo se pueden eliminar cursos que aún no hayan empezado.');
+      return;
+    }
+    if (yearId === getActiveAcademicYear()) {
+      alert('No se puede eliminar el curso que está marcado como vigente.\n\nCambia primero el vigente a otro curso y luego elimina este.');
+      return;
+    }
+    // Comprobar si tiene PRAs
+    let prasCount = c.prasCount || 0;
+    if (prasCount > 0) {
+      alert(`No se puede eliminar: el curso ${yearId} tiene ${prasCount} PRA(s) asociado(s).\n\nUn curso con PRAs no se puede eliminar para preservar el histórico.`);
+      return;
+    }
+    if (!confirm(`¿Eliminar el curso ${yearId}?\n\nEsta acción no se puede deshacer.`)) return;
+    try {
+      await fbDb.ref(fbPath(`courses/${yearId}`)).remove();
+      await adminListCourses();
+      alert(`Curso ${yearId} eliminado.`);
+    } catch (e) {
+      console.error('Error eliminando curso:', e);
+      alert('Error: ' + translateFirebaseError(e));
+    }
+  }
+
+  /* ----- Cambiar curso vigente ----- */
+  async function adminSetActiveCourse(yearId) {
+    if (!requireAdmin()) return;
+    const c = coursesCache[yearId];
+    if (!c) return alert('Curso no encontrado. Recarga la lista.');
+    if (yearId === getActiveAcademicYear()) return; // ya es el activo
+    if (!confirm(`¿Marcar el curso ${yearId} como vigente?\n\nA partir de ahora, los nuevos PRAs se guardarán bajo este curso.`)) return;
+    try {
+      await fbDb.ref(fbPath('meta/currentAcademicYear')).set(yearId);
+      activeAcademicYear = yearId;
+      refreshCourseChip();
+      await adminListCourses();
+      await refreshCourseMgmtCurrent();
+      alert(`Curso vigente cambiado a ${yearId}.`);
+    } catch (e) {
+      console.error('Error cambiando curso vigente:', e);
+      alert('Error: ' + translateFirebaseError(e));
+    }
   }
 
   /* ============================================================
@@ -1336,7 +1873,7 @@
       if (snap && snap.exists()) {
         snap.forEach(yearChild => years.add(yearChild.key));
       }
-      years.add(getCurrentAcademicYear());
+      years.add(getActiveAcademicYear());
 
       const sorted = Array.from(years).sort().reverse();
       const prevSel = savedPrasLastYearSelected || (force ? sel.value : null);
@@ -1438,7 +1975,7 @@
   async function savePRAToFirebase(praData) {
     if (!fbDb) return null;
     if (!currentUser) throw new Error('No autenticado');
-    const yearId = getCurrentAcademicYear();
+    const yearId = getActiveAcademicYear();
     const ref = fbDb.ref(fbPath(`courses/${yearId}/pras`)).push();
     await ref.set({
       ...praData,
@@ -2495,7 +3032,7 @@
       const programType = getProgramType();
       const subjectsWithCourse = selectedData.map(e => `${e.subject} (${e.course})`);
       const uniqueSubjectsWithCourse = [...new Set(subjectsWithCourse)];
-      const yearId = getCurrentAcademicYear();
+      const yearId = getActiveAcademicYear();
 
       // Datos del alumno (incluye grupo y tutor/a + curso académico)
       y = addSection(
@@ -2878,7 +3415,7 @@
         cursos: [...new Set(selectedData.map(e => e.course))],
         archivos_origen: selectedData.map(e => e.fileName),
         filtro_aplicado: getFilterName(),
-        curso_academico: getCurrentAcademicYear()
+        curso_academico: getActiveAcademicYear()
       },
       criteria: criteria.map(c => ({ materia: c.subject, codigo: c.code, descripcion: c.description, calificacion: c.grade }))
     };
