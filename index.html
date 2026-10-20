@@ -1036,6 +1036,11 @@
           <i class="fa-solid fa-arrow-left mr-1"></i> Atrás
         </button>
         <div class="flex gap-2 md:gap-3 flex-wrap justify-end">
+          <button id="btnHome" onclick="resetApp(); goToScreen(1);" hidden
+                  class="bg-slate-600 hover:bg-slate-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto"
+                  title="Volver a la pantalla de inicio">
+            <i class="fa-solid fa-house"></i> Inicio
+          </button>
           <button onclick="resetApp()"
                   class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 md:px-6 rounded-xl text-base md:text-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 mobile-p-3 w-full md:w-auto">
             <i class="fa-solid fa-plus"></i> Nuevo alumno
@@ -1401,6 +1406,52 @@
           const meta = snap.val();
           currentUser = { uid: user.uid, username: meta.username, role: meta.role || 'user', email: meta.email };
 
+          // Limpiar el estado del asistente al iniciar sesión, para que
+          // no aparezca cargado ningún PRA residual (p. ej. si el usuario
+          // anterior cerró sesión con un PRA en pantalla).
+          evaluations = [];
+          selectedEvaluationIds = [];
+          currentFilter = 'all';
+          consolidatedFailedCriteria = [];
+          selectedAdditionalFields = {};
+          textAreaState = { tareas: '', otros: {} };
+          editingPraRef = null;
+          profileManuallySet = false;
+          try { localStorage.removeItem('textAreaState'); } catch {}
+          // Limpiar también los inputs del DOM (grupo, tutor) por si acaso
+          const gInput = document.getElementById('studentGroup');
+          const tInput = document.getElementById('studentTutor');
+          if (gInput) { gInput.value = ''; gInput.classList.remove('border-red-500', 'ring-2', 'ring-red-200'); }
+          if (tInput) { tInput.value = ''; tInput.classList.remove('border-red-500', 'ring-2', 'ring-red-200'); }
+          // Limpiar el contenedor de campos adicionales (pantalla 4)
+          const afc = document.getElementById('additional-fields-container');
+          if (afc) afc.innerHTML = '';
+          // Forzar la pantalla a 1 (sin disparar goToScreen para evitar
+          // validaciones prematuras) y reflejar el estado limpio en la UI.
+          currentScreen = 1;
+          if (typeof updateLoadedEvaluationsUI === 'function') updateLoadedEvaluationsUI();
+          if (typeof updateEditingBanner === 'function') updateEditingBanner();
+          // Mostrar pantalla 1, ocultar las demás, mostrar su footer
+          if (typeof screen1 !== 'undefined' && screen1) screen1.classList.remove('hidden');
+          if (typeof screen2 !== 'undefined' && screen2) screen2.classList.add('hidden');
+          if (typeof screen3 !== 'undefined' && screen3) screen3.classList.add('hidden');
+          if (typeof screen4 !== 'undefined' && screen4) screen4.classList.add('hidden');
+          if (typeof footerButtons1 !== 'undefined' && footerButtons1) footerButtons1.classList.remove('hidden');
+          if (typeof footerButtons2 !== 'undefined' && footerButtons2) footerButtons2.classList.add('hidden');
+          if (typeof footerButtons3 !== 'undefined' && footerButtons3) footerButtons3.classList.add('hidden');
+          if (typeof footerButtons4 !== 'undefined' && footerButtons4) footerButtons4.classList.add('hidden');
+          // Mostrar el mensaje inicial y ocultar resultsSection
+          if (typeof initialMessage !== 'undefined' && initialMessage) initialMessage.classList.remove('hidden');
+          if (typeof resultsSection !== 'undefined' && resultsSection) resultsSection.classList.add('hidden');
+          if (typeof nextButton !== 'undefined' && nextButton) nextButton.disabled = true;
+          if (typeof headerScreenTitle !== 'undefined' && headerScreenTitle) headerScreenTitle.textContent = "Paso 1: Carga y Consolidación";
+          // Resetear el botón de filtro activo a "Todos"
+          const allButton = document.getElementById('filterAll');
+          if (allButton) {
+            document.querySelectorAll('.filter-button').forEach(btn => btn.classList.remove('active'));
+            allButton.classList.add('active');
+          }
+
           applyRoleUI();
           // Bug 10 fix: cargar el curso académico activo ANTES de
           // ocultar el overlay, para que cualquier acción que el
@@ -1460,6 +1511,9 @@
       userMgmtMenuBtn.classList.remove('hidden');
       // Asegurar que se ven los botones de generación (por si volvemos de un rol user)
       document.querySelectorAll('#footerButtons4 button').forEach(b => b.classList.remove('hidden'));
+      // El botón "Inicio" es solo para usuarios no-admin: ocultarlo para admins
+      const btnHome = document.getElementById('btnHome');
+      if (btnHome) btnHome.hidden = true;
       // Asegurar que se ven los "Nuevo alumno" de las pantallas 1, 2 y 3
       document.querySelectorAll('#footerButtons1 button[onclick="resetApp()"], #footerButtons2 button[onclick="resetApp()"], #footerButtons3 button[onclick="resetApp()"]')
         .forEach(b => b.classList.remove('hidden'));
@@ -1472,6 +1526,9 @@
           b.classList.add('hidden');
         }
       });
+      // El botón "Inicio" es visible SOLO para usuarios no-admin en pantalla 4
+      const btnHome = document.getElementById('btnHome');
+      if (btnHome) btnHome.hidden = false;
       // Ocultar también los "Nuevo alumno" de las pantallas 1, 2 y 3
       // (un usuario no-admin no debería resetear porque no puede generar PRAs)
       document.querySelectorAll('#footerButtons1 button[onclick="resetApp()"], #footerButtons2 button[onclick="resetApp()"], #footerButtons3 button[onclick="resetApp()"]')
