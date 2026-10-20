@@ -3699,11 +3699,11 @@
       }
 
       // Formato del PDF: PRA_MAT_Apellido1Apellido2Nombre.pdf
-      //   - MAT: siglas+curso (CYR3, TEC4, REP...). Si hay varias, unidas con '-'.
+      //   - MAT: siglas+curso (CYR3, TEC4, REP...). Si hay varias, unidas con '_'.
       //   - Apellido1Apellido2Nombre: PascalCase, apellidos primero.
       // Ej: PRA_CYR3_PerezGomezMaria.pdf
       const studentCamel = formatStudentNameCamel(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
-      const matPart = codes.join('-');
+      const matPart = codes.join('_');
       let fileName = 'PRA';
       if (matPart) fileName += '_' + matPart;
       fileName += '_' + studentCamel + '.pdf';
@@ -4270,9 +4270,9 @@
       if (!uniqueSubjectCodes.includes('REP')) uniqueSubjectCodes.push('REP');
     }
     uniqueSubjectCodes = uniqueSubjectCodes.filter(code => code && code.trim() !== '');
-    // MAT: si hay varias materias, se unen con guión (sin _, para no confundir).
-    // Ej: ["CYR3", "TEC4"] → "CYR3-TEC4"
-    const matPart = uniqueSubjectCodes.join('-');
+    // MAT: si hay varias materias, se unen con guión bajo.
+    // Ej: ["CYR3", "TEC4"] → "CYR3_TEC4"
+    const matPart = uniqueSubjectCodes.join('_');
     const filterPart = toCamelCase('CCEE ' + getFilterName());  // PascalCase: "CceeSuspensos"
     let fileName = 'PRA';
     if (matPart) fileName += '_' + matPart;
