@@ -10,7 +10,7 @@
 
 // === VERSIÓN DE LA APLICACIÓN ===
 // Bump de este valor en cada release; el chip del header lo mostrará.
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.5.0';
 const CACHE_NAME = `isustopra-${APP_VERSION}`;
 const PRECACHE = [
   './',
@@ -78,8 +78,12 @@ self.addEventListener('activate', (event) => {
     }
 
     const keys = await caches.keys();
+    // Bug 2 fix: solo borrar caches que empiecen por nuestro prefijo
+    // 'isustopra-'. caches.keys() es origin-scoped, así que sin este
+    // filtro borraríamos también caches del portal tecdea.github.io
+    // u otras PWAs del mismo origen.
     await Promise.all(
-      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+      keys.filter(k => k.startsWith('isustopra-') && k !== CACHE_NAME).map(k => caches.delete(k))
     );
     await self.clients.claim();
     // Avisar a todas las pestañas abiertas para que refresquen el chip.
