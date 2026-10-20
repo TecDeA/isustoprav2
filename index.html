@@ -435,7 +435,7 @@
               <button onclick="openSavedPrasModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
                 <i class="fa-solid fa-folder-open text-blue-600 w-5"></i> PRAs guardados
               </button>
-              <button id="courseMgmtMenuBtn" onclick="openCourseMgmtModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
+              <button id="courseMgmtMenuBtn" onclick="openCourseMgmtModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm hidden">
                 <i class="fa-solid fa-calendar-days text-emerald-600 w-5"></i> Gestión de cursos
               </button>
               <button id="userMgmtMenuBtn" onclick="openUserManagementModal()" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3 text-sm">
@@ -522,7 +522,7 @@
       <div class="p-6 space-y-4">
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
           <div class="flex items-center gap-2">
-            <label class="text-sm font-semibold text-slate-600">Curso académico:</label>
+            <label class="text-sm font-semibold text-slate-600" for="savedPrasYearFilter">Curso académico (solo visualización):</label>
             <select id="savedPrasYearFilter" onchange="renderSavedPrasList()" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
               <option value="">Cargando…</option>
             </select>
@@ -1498,9 +1498,18 @@
     userMenuRole.textContent = currentUser.role;
     userMenuRoleLbl.textContent = roleLbl;
 
-    // Botones de gestión: visibles para todos, pero las acciones dentro
-    // del modal requieren admin (requireAdmin()).
-    if (courseMgmtMenuBtn) courseMgmtMenuBtn.classList.remove('hidden');
+    // Botón de gestión de cursos: SOLO visible para admins.
+    // Los usuarios no-admin no pueden crear/editar/eliminar/activar cursos,
+    // así que no tiene sentido que vean el modal de gestión de cursos.
+    // El año en curso se muestra en el chip del header; los usuarios
+    // pueden ver PRAs de otros años desde "PRAs guardados" (selector visual).
+    if (courseMgmtMenuBtn) {
+      if (currentUser.role === 'admin') {
+        courseMgmtMenuBtn.classList.remove('hidden');
+      } else {
+        courseMgmtMenuBtn.classList.add('hidden');
+      }
+    }
 
     // Aplicar modo solo lectura a la pantalla 4 si el usuario no es admin.
     // Esto deshabilita checks, textareas y botones para que no parezca que
