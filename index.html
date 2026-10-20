@@ -1228,9 +1228,12 @@
           currentUser = { uid: user.uid, username: meta.username, role: meta.role || 'user', email: meta.email };
 
           applyRoleUI();
-          hideAuthOverlay();
-          // Cargar el curso académico activo desde Firebase (con fallback automático)
+          // Bug 10 fix: cargar el curso académico activo ANTES de
+          // ocultar el overlay, para que cualquier acción que el
+          // usuario haga justo al entrar use el año correcto y no
+          // el fallback automático.
           await loadActiveAcademicYear();
+          hideAuthOverlay();
           refreshCourseChip();
           // Cargar sugerencias de grupos y tutores para autocompletado
           loadGroupTutorSuggestions();
@@ -1243,6 +1246,13 @@
         }
       } else {
         currentUser = null;
+        // Bug 7 fix: limpiar el estado de edición al cerrar sesión,
+        // si no, otro admin que entre después podría sobrescribir el
+        // PRA que estábamos editando sin saberlo.
+        editingPraRef = null;
+        if (typeof updateEditingBanner === 'function') updateEditingBanner();
+        // Limpiar también el flag de perfil manualmente seteado
+        if (typeof profileManuallySet !== 'undefined') profileManuallySet = false;
         adminInitialized = await checkAdminInitialized();
         showAuthOverlay(adminInitialized ? 'login' : 'setup');
       }
@@ -1408,7 +1418,9 @@
   }
 
   function nextAcademicYearId() {
-    // Calcula el próximo yearId que no exista aún.
+    // Bug 11 fix: corrige el comentario. NO comprueba existencia;
+    // solo devuelve el próximo año académico natural. La verificación
+    // de duplicados se hace en adminCreateCourse().
     const today = new Date();
     const y = today.getFullYear();
     const m = today.getMonth();
@@ -1644,13 +1656,21 @@
     const e = new Date(endDate + 'T23:59:59');
     if (e <= s) return setAuthError(errEl, 'La fecha de fin debe ser posterior a la de inicio.');
 
-    // Re-verificar que sigue siendo future (no han cambiado las condiciones)
-    const c = coursesCache[editingCourseYearId];
-    if (c) {
-      const status = getCourseStatus(c);
-      if (status !== 'future') {
-        return setAuthError(errEl, 'El curso ya no es futuro (puede que haya empezado). No se puede editar.');
-      }
+    // Bug 13 fix: re-leer el meta del curso directamente desde Firebase
+    // en lugar de usar coursesCache, que puede estar obsoleto.
+    let currentMeta = null;
+    try {
+      const snap = await fbDb.ref(fbPath(`courses/${editingCourseYearId}/meta`)).get();
+      if (snap && snap.exists()) currentMeta = snap.val();
+    } catch (err) {
+      return setAuthError(errEl, 'No se pudo verificar el estado actual del curso: ' + err.message);
+    }
+    if (!currentMeta || !currentMeta.startDate || !currentMeta.endDate) {
+      return setAuthError(errEl, 'No se encontró el meta del curso. ¿Fue borrado por otro admin?');
+    }
+    const currentStatus = getCourseStatus(currentMeta);
+    if (currentStatus !== 'future') {
+      return setAuthError(errEl, 'El curso ya no es futuro (puede que haya empezado o que otro admin lo modificara). No se puede editar.');
     }
     // Si las nuevas fechas hacen que el curso sea vigente o pasado, advertir
     const newStatus = getCourseStatus({ startDate, endDate });
@@ -1686,8 +1706,21 @@
       alert('No se puede eliminar el curso que está marcado como vigente.\n\nCambia primero el vigente a otro curso y luego elimina este.');
       return;
     }
-    // Comprobar si tiene PRAs
-    let prasCount = c.prasCount || 0;
+    // Bug 5 fix: re-leer PRAs directamente de Firebase en lugar de
+    // usar el prasCount cacheado, que puede estar obsoleto si otro
+    // admin guardó un PRA mientras tanto.
+    let prasCount = 0;
+    try {
+      const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras`)).get();
+      if (snap && snap.exists()) {
+        prasCount = Object.keys(snap.val()).length;
+      }
+    } catch (e) {
+      console.warn('No se pudo leer PRAs del curso:', e);
+      // Si no podemos leer, asumimos lo peor: no eliminamos.
+      alert('No se pudo verificar si el curso tiene PRAs. No se elimina por seguridad.');
+      return;
+    }
     if (prasCount > 0) {
       alert(`No se puede eliminar: el curso ${yearId} tiene ${prasCount} PRA(s) asociado(s).\n\nUn curso con PRAs no se puede eliminar para preservar el histórico.`);
       return;
@@ -2000,6 +2033,7 @@
    * y volver a guardar (esta vez como actualización).
    * ============================================================ */
   let editingPraRef = null; // { yearId, praId } cuando se está editando
+  let profileManuallySet = false; // Bug 14: si true, renderScreen2 no sobrescribe el perfil
 
   async function editSavedPRA(yearId, praId) {
     if (!requireAdmin()) return;
@@ -2031,7 +2065,12 @@
       selectedAdditionalFields = data.selectedAdditionalFields
         ? JSON.parse(JSON.stringify(data.selectedAdditionalFields))
         : {};
-      textAreaState = data.textAreaState
+      // Bug 4 fix: guardar el textAreaState en una variable temporal y
+      // aplicarlo DESPUÉS de goToScreen(1), porque goToScreen hace
+      // saveTextAreaState() si currentScreen === 4, lo cual sobrescribe
+      // el textAreaState que acabamos de restaurar con los valores viejos
+      // del DOM.
+      const restoredTextAreaState = data.textAreaState
         ? JSON.parse(JSON.stringify(data.textAreaState))
         : { tareas: '', otros: {} };
 
@@ -2041,6 +2080,9 @@
       // Cerrar modal
       closeSavedPrasModal();
 
+      // Forzar currentScreen a 1 antes de goToScreen para que NO ejecute
+      // saveTextAreaState() con los textareas viejos todavía en el DOM.
+      currentScreen = 1;
       // Ir a pantalla 1 y restaurar UI
       goToScreen(1);
       updateLoadedEvaluationsUI();
@@ -2052,15 +2094,18 @@
       if (g) g.value = data.group || '';
       if (t) t.value = data.tutor || '';
 
-      // Restaurar perfil seleccionado
+      // Restaurar perfil seleccionado (Bug 14 fix: marcamos un flag para
+      // que renderScreen2 no lo sobrescriba con la autodetección)
       if (data.profile) {
         const radio = document.getElementById(data.profile);
         if (radio) radio.checked = true;
+        profileManuallySet = true;
+      } else {
+        profileManuallySet = false;
       }
 
-      // Restaurar textareas (si los hubiere) tras render de pantalla 4
-      // No llamamos a loadAdditionalFields aquí (se hace al entrar en pantalla 4),
-      // pero guardamos el estado en textAreaState que ya se rehidratará.
+      // Ahora sí aplicar el textAreaState restaurado (post goToScreen)
+      textAreaState = restoredTextAreaState;
       try { localStorage.setItem('textAreaState', JSON.stringify(textAreaState)); } catch {}
 
       // Mostrar banner de edición
@@ -2118,14 +2163,23 @@
     if (!currentUser) throw new Error('No autenticado');
 
     if (editRef && editRef.yearId && editRef.praId) {
-      // Modo edición: actualizar PRA existente
+      // Modo edición: actualizar PRA existente.
+      // Bug 6 fix: sobrescribir academicYear con el del PRA original
+      // (editRef.yearId), no el activo actualmente. Si no, el registro
+      // acabaría con academicYear = <año activo actual> pero siguiendo
+      // alojado bajo courses/<año original>/pras/, lo que es inconsistente
+      // y confundiría a regeneratePRAPdf y al listado de PRAs.
       const ref = fbDb.ref(fbPath(`courses/${editRef.yearId}/pras/${editRef.praId}`));
       await ref.update({
         ...praData,
+        academicYear: editRef.yearId,
         updatedAt: firebase.database.ServerValue.TIMESTAMP,
         updatedBy: currentUser.uid,
         updatedByUsername: currentUser.username
       });
+      // Actualizar también la asociación grupo↔tutor (por si cambiaron)
+      try { await saveGroupTutorAssociation(praData.group, praData.tutor, editRef.yearId); }
+      catch (e) { console.warn('No se pudo guardar asociación grupo/tutor:', e); }
       return { yearId: editRef.yearId, praId: editRef.praId };
     }
 
@@ -2301,11 +2355,15 @@
   }
 
   // Configura listeners en los inputs para refinar sugerencias cruzadas
+  // Bug 3 fix: guard para no añadir listeners duplicados en cada onAuthStateChanged
+  let groupTutorListenersAttached = false;
   function setupGroupTutorListeners() {
+    if (groupTutorListenersAttached) return;
     const g = document.getElementById('studentGroup');
     const t = document.getElementById('studentTutor');
     if (g) g.addEventListener('change', () => filterGroupTutorSuggestions('group'));
     if (t) t.addEventListener('change', () => filterGroupTutorSuggestions('tutor'));
+    groupTutorListenersAttached = true;
   }
 
   /* ============================================================
@@ -2945,8 +3003,17 @@
     selectedCriterionDetails.classList.add('hidden'); selectedRecoveryCriterion = null;
     const defaultOptionId = determineStudentProfile();
     document.querySelectorAll('input[name="studentProfile"]').forEach(radio => {
-      radio.onchange = null; radio.addEventListener('change', updateWarningState); radio.checked = (radio.id === defaultOptionId);
+      radio.onchange = null; radio.addEventListener('change', updateWarningState);
+      // Bug 14 fix: si el perfil se estableció manualmente (al editar un
+      // PRA guardado), respetarlo. Solo autoseleccionar si no hay ninguno
+      // marcado todavía.
+      if (!profileManuallySet) {
+        radio.checked = (radio.id === defaultOptionId);
+      }
     });
+    // Resetear el flag tras renderScreen2 para que futuras cargas de
+    // PRAs nuevos sí autodetecten.
+    profileManuallySet = false;
     updateWarningState();
     const criteriaByGroup = getConsolidatedFailedCriteria();
     const selectedProfile = getSelectedProfile();
@@ -3219,7 +3286,9 @@
       `;
       container.appendChild(sectionDiv);
     }
-    setTimeout(() => setupTextAreaEvents(), 100);
+    // Bug 9 fix: NO llamar a setupTextAreaEvents() aquí. El llamador
+    // (goToScreen(4)) ya hace setTimeout(() => { restoreTextAreaState();
+    // setupTextAreaEvents(); }, 100). Hacerlo aquí duplica listeners.
   }
 
   function toggleTareasTextarea(checkbox) {
@@ -3522,6 +3591,21 @@
         }
       }
 
+      // ====== Descargar PDF ANTES del save (Bug 8 fix) ======
+      // Si el save falla, el usuario al menos ya tiene el PDF.
+      // Antes era al revés: si save fallaba, decíamos "PDF descargado"
+      // pero en realidad nunca se descargó.
+      let pdfDownloaded = false;
+      if (downloadPdf) {
+        try {
+          doc.save(fileName);
+          pdfDownloaded = true;
+        } catch (pdfErr) {
+          console.error('Error descargando PDF:', pdfErr);
+          // Continuamos para intentar el save en Firebase
+        }
+      }
+
       // ====== Guardar en Firebase (SIEMPRE, tanto en modo "solo guardado" como "guardar + PDF") ======
       // Si estamos editando un PRA existente, actualizamos; si no, creamos uno nuevo.
       const isEditing = !!editingPraRef;
@@ -3529,9 +3613,10 @@
         const { yearId: yid, praId } = result || {};
         const action = isEditing ? 'actualizado' : 'guardado';
         console.log(`PRA ${action} en Firebase:`, yid, praId);
-        if (downloadPdf) {
-          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nPDF descargándose...`);
-          doc.save(fileName);
+        if (downloadPdf && pdfDownloaded) {
+          alert(`PRA ${action} correctamente en la nube (${yid}).\n\nPDF descargado.`);
+        } else if (downloadPdf && !pdfDownloaded) {
+          alert(`PRA ${action} en la nube (${yid}), pero hubo un error al descargar el PDF. Revisa la consola.`);
         } else {
           alert(`PRA ${action} correctamente en la nube (${yid}).\n\nNo se ha descargado el PDF (modo "solo guardado").`);
         }
@@ -3540,10 +3625,9 @@
         updateEditingBanner();
       }).catch(err => {
         console.error('Error guardando PRA en Firebase:', err);
-        const stillDownloaded = downloadPdf;
-        const msg = stillDownloaded
-          ? `El PDF se ha descargado, pero NO se pudo guardar en Firebase:\n${err.message}`
-          : `No se pudo guardar el PRA en Firebase:\n${err.message}`;
+        const msg = pdfDownloaded
+          ? `El PDF se ha descargado, pero NO se pudo guardar en Firebase:\n${err.message}\n\nTienes el PDF, pero los cambios no están en la nube.`
+          : `No se pudo guardar el PRA en Firebase:\n${err.message}\n\nNi PDF ni nube fueron actualizados.`;
         alert(msg);
       });
     } catch (error) {
@@ -3611,6 +3695,112 @@
           doc.setDrawColor(200, 200, 200); doc.line(margin, y+1, 196, y+1); y += 8; doc.setFont("helvetica", "normal");
           criteriaText.split('\n').forEach(line => { if (line.trim()) { y = addText(line, false, y); y += 2; } });
         }
+      }
+
+      // PROPUESTA DE REFUERZO (Bug 1 fix)
+      checkPageBreak(20); doc.setFillColor(220, 252, 231); doc.rect(margin, y-5, 182, 10, 'F');
+      doc.setTextColor(21, 128, 61); doc.setFont("helvetica", "bold"); doc.text("PROPUESTA DE REFUERZO", 105, y+1, { align: "center" });
+      y += 15; doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "normal");
+
+      if (profile === 'profileOption2') {
+        let texto = "El alumno/a cursa TEC4 y repite curso. Se trabajarán todos los criterios de Tecnología 4º.\n\nSe podrán proponer actividades adicionales que desarrollen los criterios:";
+        y = addText(texto);
+        allTEC4Criteria.forEach(id => {
+          checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
+          doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
+          const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
+          if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
+          doc.text(descLines, 35, y); y += descHeight + 4;
+        });
+      } else if (profile === 'profileOption3') {
+        const relatedTEC4 = getRelatedTEC4Criteria(failedCriteria);
+        let texto = "Criterios de Tecnología 4º a reforzar en base a las materias del departamento no superadas.\n\nSe podrán proponer actividades adicionales a lo largo del curso:";
+        y = addText(texto);
+        if (relatedTEC4.length === 0) { y = addText("No se han detectado criterios específicos correlacionados."); }
+        else {
+          relatedTEC4.forEach(id => {
+            checkPageBreak(25); const desc = tec4CriteriaDescriptions[id];
+            doc.setFont("helvetica", "bold"); doc.text(id, margin, y); doc.setFont("helvetica", "normal");
+            const descLines = doc.splitTextToSize(desc, 160), descHeight = descLines.length * lineHeight;
+            if (y + descHeight > pageHeight) { doc.addPage(); y = 20; }
+            doc.text(descLines, 35, y); y += descHeight + 4;
+          });
+        }
+      } else {
+        let texto = "El/la alumno/a deberá realizar actividades para superar los criterios no superados del Departamento.\n\nLa entrega se realizará en Classroom del Departamento.\n\nSe proporcionará una evaluación pormenorizada por criterio.";
+        y = addText(texto);
+        const groupedCriteria = groupCriteriaByCourseAndSubject(failedCriteria);
+        Object.keys(groupedCriteria).sort().forEach(course => {
+          Object.keys(groupedCriteria[course]).sort().forEach(subject => {
+            checkPageBreak(15);
+            const subjectCode = getSubjectCode(subject, course);
+            const fullSubjectName = getFullSubjectName(subject, course);
+            doc.setFont("helvetica", "bold"); doc.text(`${fullSubjectName} (${subjectCode})`, margin, y); y += 7;
+            const criteria = groupedCriteria[course][subject], codesList = criteria.map(c => c.code).join(", ");
+            checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 180 }); y += lineHeight * 2; y += 5;
+          });
+        });
+      }
+
+      // OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA (Bug 1 fix)
+      if (Object.keys(selectedAdditionalFields).length > 0) {
+        checkPageBreak(20); y += 10;
+        doc.setFillColor(240, 249, 255); doc.rect(margin, y-5, 182, 10, 'F');
+        doc.setTextColor(37, 99, 235); doc.setFont("helvetica", "bold");
+        doc.text("OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA", 105, y+1, { align: "center" });
+        y += 15; doc.setTextColor(0, 0, 0);
+
+        for (const [section, items] of Object.entries(selectedAdditionalFields)) {
+          checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(section, margin, y); y += 7;
+          if (items.length === 0) { doc.setFont("helvetica", "italic"); y = addText("No se han seleccionado elementos específicos.", false, y); }
+          else {
+            doc.setFont("helvetica", "normal");
+            if (section === "TIPO DE ACTIVIDADES Y TAREAS") {
+              if (items.includes("Tareas (precisar)") && textAreaState.tareas) {
+                checkPageBreak(10); doc.text("Tareas específicas:", margin, y); y += lineHeight;
+                const lines = textAreaState.tareas.split('\n').filter(l => l.trim());
+                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                y += 5;
+              }
+              let normal = false;
+              items.forEach(item => {
+                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
+                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                }
+              });
+              if (normal) y += 5;
+              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
+                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
+                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
+                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                y += 5;
+              }
+            } else {
+              let normal = false;
+              items.forEach(item => {
+                if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
+                  checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                }
+              });
+              if (normal) y += 5;
+              if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
+                checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
+                const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
+                let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                y += 5;
+              }
+            }
+          }
+          doc.setDrawColor(200, 200, 200); doc.line(margin, y, 196, y); y += 10;
+        }
+      }
+
+      // Footer (Bug 1 fix)
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
+        doc.text("Generado automáticamente por ISUStoPRA - Dpto. Tecnología", 105, 290, { align: "center" });
+        doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
       }
 
       const studentSafe = sanitizeFilename(studentName);
