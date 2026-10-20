@@ -162,13 +162,94 @@
     #bottomNav button { padding-top: .45rem !important; padding-bottom: .45rem !important; }
 
     @media (max-width: 768px) {
-      .mobile-padding { padding-bottom: 88px; }
+      .mobile-padding { padding-bottom: 100px; }  /* más espacio para botones grandes */
       .mobile-text-sm { font-size: .9rem; }
       .mobile-p-3 { padding: .75rem; }
       .mobile-py-2 { padding-top: .5rem; padding-bottom: .5rem; }
       #bottomNav button { font-size: .9rem; }
+      /* Responsive: header más compacto en móvil */
+      header h1 { font-size: 1rem; }
+      header .text-sm { font-size: .75rem; }
+      /* Modales: padding reducido en móvil */
+      .modal-content { padding: 1rem !important; }
+      /* Inputs y labels más pequeños en móvil */
+      input, textarea, select { font-size: 16px !important; }  /* 16px evita zoom automático en iOS */
+      /* Tabla de criterios: scroll horizontal forzado */
+      .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+      /* Botones de footer más grandes y accesibles en táctil */
+      #bottomNav button {
+        min-height: 48px;
+        padding: .75rem 1rem !important;
+      }
     }
-    @supports(padding: max(0px)) { .safe-area-bottom { padding-bottom: max(.5rem, env(safe-area-inset-bottom)); } }
+
+    /* Breakpoint específico para móvil pequeño (<= 480px) */
+    @media (max-width: 480px) {
+      .mobile-padding { padding-bottom: 120px; }
+      /* Header: ocultar chip de versión y curso para ganar espacio */
+      header #appVersionChip,
+      header #courseChip { display: none !important; }
+      /* El título del header debe caber */
+      header h1 { font-size: .9rem; max-width: 60vw; }
+      /* Modales: ocupar casi toda la pantalla */
+      .fixed.inset-0 > div { max-width: 100% !important; margin: .5rem !important; }
+      /* Botones de footer: apilar verticalmente si no caben */
+      #footerButtons4 .flex.gap-2,
+      #footerButtons4 .flex.gap-3 { flex-direction: column; width: 100%; }
+      #footerButtons4 .flex.gap-2 > button,
+      #footerButtons4 .flex.gap-3 > button { width: 100%; }
+      /* Dropdown de usuario: ancho completo */
+      #userMenu { width: calc(100vw - 2rem); right: -1rem !important; }
+      /* Datos del alumno: 1 columna en móvil pequeño */
+      .grid.grid-cols-1.md\:grid-cols-3 { grid-template-columns: 1fr; gap: 1rem; }
+      /* Tabla de criterios: texto más pequeño */
+      .overflow-x-auto table { font-size: .8rem; }
+      .overflow-x-auto table th,
+      .overflow-x-auto table td { padding: .5rem !important; }
+    }
+
+    /* Breakpoint para tablet (769px - 1024px) */
+    @media (min-width: 769px) and (max-width: 1024px) {
+      /* En tablet, las 2 columnas de pantalla 1 funcionan bien */
+      /* Ajustar tamaño de fuente de algunos elementos */
+      header h1 { font-size: 1.05rem; }
+    }
+
+    /* Landscape en móvil: aprovechar el ancho */
+    @media (max-width: 900px) and (orientation: landscape) {
+      .mobile-padding { padding-bottom: 80px; }
+      #bottomNav button { min-height: 40px; }
+    }
+
+    /* Pantallas muy anchas: centrar contenido y limitar ancho */
+    @media (min-width: 1600px) {
+      main { max-width: 1400px; }
+    }
+
+    /* Soporte para notch / safe areas en iPhone */
+    @supports(padding: max(0px)) {
+      .safe-area-bottom { padding-bottom: max(.5rem, env(safe-area-inset-bottom)); }
+      header > div { padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+    }
+
+    /* Mejorar scroll en táctil: momentum scrolling */
+    * { -webkit-overflow-scrolling: touch; }
+
+    /* Inputs: evitar zoom en iOS (font-size >= 16px) */
+    input[type="text"], input[type="password"], input[type="email"],
+    input[type="date"], input[type="number"], textarea, select {
+      font-size: 16px;
+    }
+    @media (min-width: 769px) {
+      input[type="text"], input[type="password"], input[type="email"],
+      input[type="date"], input[type="number"], textarea, select {
+        font-size: 14px;  /* en escritorio sí podemos bajar */
+      }
+    }
+
+    /* Tabla de criterios: scroll horizontal suave en móvil */
+    .overflow-x-auto { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .overflow-x-auto table { min-width: 600px; }  /* fuerza scroll en móvil */
     @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
     @media (prefers-color-scheme: dark) {
       .dark-mode-compatible { background-color: #111827; color: #e5e7eb; }
@@ -206,7 +287,12 @@
   <div id="authOverlay" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
     <div class="auth-card w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
       <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white p-6 text-center">
-        <div class="bg-white/15 inline-flex p-3 rounded-xl mb-3"><i class="fa-solid fa-file-pdf text-2xl"></i></div>
+        <!-- Icono representativo: PDF → documento de texto (PRA generado) -->
+        <div class="bg-white/15 inline-flex items-center gap-2 px-4 py-3 rounded-xl mb-3">
+          <i class="fa-solid fa-file-pdf text-2xl"></i>
+          <i class="fa-solid fa-arrow-right text-sm opacity-80"></i>
+          <i class="fa-solid fa-file-lines text-2xl"></i>
+        </div>
         <h2 class="text-xl font-bold">ISUS to PRA V2</h2>
         <p id="authSubtitle" class="text-blue-100 text-sm mt-1">Inicia sesión para continuar</p>
       </div>
@@ -1045,6 +1131,70 @@
     return s;
   }
 
+  /**
+   * Convierte una cadena a notación dromedaria (camelCase).
+   * Elimina tildes, ñ→n, separadores (espacios, _, -, .) y une palabras
+   * capitalizando la primera letra de cada una excepto la primera.
+   * Ej: "María Pérez" → "mariaPerez"
+   *     "CYR.3.1.2" → "cyr312"  (los puntos se tratan como separadores)
+   *     "TEC4_María_Pérez" → "tec4MariaPerez"
+   *
+   * Se usa para generar nombres de archivo sin guiones bajos ni comas,
+   * más limpios para sistemas de ficheros.
+   */
+  function toCamelCase(s) {
+    const fallback = 'desconocido';
+    let str = (s == null ? '' : String(s)).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Reemplazar ñ y ç por n y c
+    str = str.replace(/ñ/g, 'n').replace(/Ñ/g, 'N').replace(/ç/g, 'c').replace(/Ç/g, 'C');
+    // Separar por cualquier combinación de espacios, _, -, ., comas
+    const parts = str.split(/[\s_,.\-]+/).filter(p => p.length > 0);
+    if (parts.length === 0) return fallback;
+    // Primera palabra en minúsculas, resto capitalizada
+    return parts.map((p, i) => {
+      const lower = p.toLowerCase();
+      return i === 0 ? lower : lower.charAt(0).toUpperCase() + lower.slice(1);
+    }).join('');
+  }
+
+  /**
+   * Formatea el nombre completo de un alumno en notación dromedaria
+   * PERO con los apellidos primero y luego el nombre.
+   *
+   * Heurística para hispanohablantes:
+   *   - Si hay 1 palabra: esa es el nombre → "María" → "Maria"
+   *   - Si hay 2 palabras: [apellido1, nombre] → "Pérez María" → "PerezMaria"
+   *   - Si hay 3 palabras: [apellido1, apellido2, nombre] → "Pérez Gómez María" → "PerezGomezMaria"
+   *   - Si hay 4+ palabras: se asume que las dos primeras son apellidos y el resto nombre.
+   *     "Pérez Gómez María del Carmen" → "PerezGomezMariaDelCarmen"
+   *
+   * El resultado SIEMPRE empieza en mayúscula (PascalCase) porque es la
+   * primera parte de un filename tipo "PRA_CYR3_PerezGomezMaria.pdf".
+   */
+  function formatStudentNameCamel(fullName) {
+    const fallback = 'Desconocido';
+    if (!fullName) return fallback;
+    let str = String(fullName).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    str = str.replace(/ñ/g, 'n').replace(/Ñ/g, 'N').replace(/ç/g, 'c').replace(/Ç/g, 'C');
+    const parts = str.split(/[\s_,.\-]+/).filter(p => p.length > 0);
+    if (parts.length === 0) return fallback;
+    let apellidos, nombre;
+    if (parts.length === 1) {
+      apellidos = [];
+      nombre = parts;
+    } else if (parts.length === 2) {
+      apellidos = [parts[0]];
+      nombre = [parts[1]];
+    } else {
+      // 3+ palabras: las 2 primeras son apellidos, el resto nombre
+      apellidos = parts.slice(0, 2);
+      nombre = parts.slice(2);
+    }
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+    const result = [...apellidos, ...nombre].map(cap).join('');
+    return result || fallback;
+  }
+
   /* ============================================================
    * DOM REFS (auth)
    * ============================================================ */
@@ -1808,13 +1958,14 @@
 
     // Patrón "secondary app" para no cerrar la sesión del admin
     let secondaryApp = null;
+    let userUid = null;
     try {
       secondaryApp = firebase.initializeApp(firebaseConfig, 'isustopra-secondary-' + Date.now());
       const secondaryAuth = secondaryApp.auth();
       const email = usernameToEmail(username);
       const cred = await secondaryAuth.createUserWithEmailAndPassword(email, p1);
-      const uid = cred.user.uid;
-      await fbDb.ref(fbPath(`users/${uid}`)).set({
+      userUid = cred.user.uid;
+      await fbDb.ref(fbPath(`users/${userUid}`)).set({
         username: username,
         role: role,
         email: email,
@@ -1831,6 +1982,57 @@
       await adminListUsers();
     } catch (e) {
       console.error('Error creando usuario:', e);
+      // Bug fix: si el error es "email-already-in-use", el usuario ya
+      // existe en Firebase Auth pero puede que su metadata no esté en
+      // la BD (por un fallo anterior). En ese caso, ofrecemos
+      // "recuperar" la metadata iniciando sesión con la contraseña
+      // proporcionada y escribiendo la metadata.
+      if (e.code === 'auth/email-already-in-use') {
+        const email = usernameToEmail(username);
+        // Comprobar si el usuario huérfano ya tiene metadata en la BD
+        // (en cuyo caso sí existe de verdad y no hay nada que hacer).
+        // Para ello necesitamos su UID. Como no podemos listar usuarios
+        // de Auth desde el cliente, hacemos una segunda aproximación:
+        // buscar en la BD si hay algún users/{uid} con username = username.
+        const snapUsers = await fbDb.ref(fbPath('users')).orderByChild('username').equalTo(username).get();
+        if (snapUsers && snapUsers.exists()) {
+          // El usuario SÍ tiene metadata → realmente ya existe.
+          setAuthError(errEl, `El usuario "${username}" ya existe. Usa otro nombre.`);
+          return;
+        }
+        // El usuario está en Auth pero NO en la BD → huérfano. Ofrecer
+        // recuperarlo iniciando sesión y escribiendo su metadata.
+        if (confirm(`El usuario "${username}" ya existe en Firebase Auth pero no tiene metadata en la base de datos (probablemente por un fallo anterior).\n\n¿Quieres recuperar este usuario iniciando sesión con la contraseña proporcionada y escribiendo su metadata ahora?`)) {
+          try {
+            const recoveryAuth = secondaryApp.auth();
+            const cred2 = await recoveryAuth.signInWithEmailAndPassword(email, p1);
+            const orphanUid = cred2.user.uid;
+            await fbDb.ref(fbPath(`users/${orphanUid}`)).set({
+              username: username,
+              role: role,
+              email: email,
+              createdAt: firebase.database.ServerValue.TIMESTAMP,
+              createdBy: currentUser.uid,
+              recovered: true
+            });
+            await recoveryAuth.signOut();
+            okEl.classList.remove('hidden');
+            okEl.querySelector('span').textContent = `Usuario "${username}" recuperado y creado con perfil "${role === 'admin' ? 'Administrador' : 'Usuario'}".`;
+            document.getElementById('newUserUsername').value = '';
+            document.getElementById('newUserPass1').value = '';
+            document.getElementById('newUserPass2').value = '';
+            await adminListUsers();
+            return;
+          } catch (recoveryErr) {
+            console.error('Error recuperando usuario huérfano:', recoveryErr);
+            setAuthError(errEl, `No se pudo recuperar el usuario: ${translateFirebaseError(recoveryErr)}.\n\nLa contraseña proporcionada no coincide con la del usuario existente en Auth. Si no la recuerdas, borra el usuario desde la consola de Firebase (Authentication → Users) y vuelve a intentarlo.`);
+            return;
+          }
+        } else {
+          setAuthError(errEl, `Operación cancelada. El usuario "${username}" sigue existiendo en Auth sin metadata. Si quieres eliminarlo del todo, usa la consola de Firebase (Authentication → Users → Delete).`);
+          return;
+        }
+      }
       setAuthError(errEl, translateFirebaseError(e));
     } finally {
       if (secondaryApp) {
@@ -2391,8 +2593,23 @@
     if (groupTutorListenersAttached) return;
     const g = document.getElementById('studentGroup');
     const t = document.getElementById('studentTutor');
-    if (g) g.addEventListener('change', () => filterGroupTutorSuggestions('group'));
-    if (t) t.addEventListener('change', () => filterGroupTutorSuggestions('tutor'));
+    if (g) {
+      g.addEventListener('change', () => filterGroupTutorSuggestions('group'));
+      // Bug 2: quitar resaltado rojo al escribir
+      g.addEventListener('input', () => {
+        if (g.value.trim()) {
+          g.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+        }
+      });
+    }
+    if (t) {
+      t.addEventListener('change', () => filterGroupTutorSuggestions('tutor'));
+      t.addEventListener('input', () => {
+        if (t.value.trim()) {
+          t.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+        }
+      });
+    }
     groupTutorListenersAttached = true;
   }
 
@@ -2627,6 +2844,28 @@
    * ============================================================ */
   function goToScreen(screenNumber) {
     if (currentScreen === 4) saveTextAreaState();
+    // Bug 2 fix: bloquear paso de pantalla 1 si no hay grupo y tutor
+    if (currentScreen === 1 && screenNumber > 1) {
+      const groupInput = document.getElementById('studentGroup');
+      const tutorInput = document.getElementById('studentTutor');
+      // Solo validar si resultsSection está visible (hay PDFs cargados)
+      const resultsVisible = resultsSection && !resultsSection.classList.contains('hidden');
+      if (resultsVisible && (!groupInput.value.trim() || !tutorInput.value.trim())) {
+        const missing = [];
+        if (!groupInput.value.trim()) missing.push('Grupo');
+        if (!tutorInput.value.trim()) missing.push('Tutor/a');
+        showValidationModal(`Para continuar debes indicar: <strong>${missing.join(' y ')}</strong> del alumno en la pantalla 1.`);
+        // Resaltar los inputs vacíos
+        if (!groupInput.value.trim()) {
+          groupInput.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+          groupInput.focus();
+        }
+        if (!tutorInput.value.trim()) {
+          tutorInput.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+        }
+        return;
+      }
+    }
     currentScreen = screenNumber;
     [screen1, screen2, screen3, screen4].forEach(s => s.classList.add('hidden'));
     [footerButtons1, footerButtons2, footerButtons3, footerButtons4].forEach(f => f.classList.add('hidden'));
@@ -3432,13 +3671,15 @@
         if (!codes.includes('REP')) codes.push('REP');
       }
 
-      // FIX TILDES: sanitizeFilename respetando á, é, í, ó, ú, ñ
-      const studentSafe = sanitizeFilename(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
-      let fileName = `PRA`;
-      const subjectPart = codes.join('_');
-      if (subjectPart) fileName += `_${subjectPart}`;
-      fileName += `_${studentSafe}.pdf`;
-      fileName = fileName.replace(/_+/g, '_');
+      // Formato del PDF: PRA_MAT_Apellido1Apellido2Nombre.pdf
+      //   - MAT: siglas+curso (CYR3, TEC4, REP...). Si hay varias, unidas con '-'.
+      //   - Apellido1Apellido2Nombre: PascalCase, apellidos primero.
+      // Ej: PRA_CYR3_PerezGomezMaria.pdf
+      const studentCamel = formatStudentNameCamel(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
+      const matPart = codes.join('-');
+      let fileName = 'PRA';
+      if (matPart) fileName += '_' + matPart;
+      fileName += '_' + studentCamel + '.pdf';
 
       const praType = getPRAType();
       const programType = getProgramType();
@@ -3846,8 +4087,10 @@
         doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
       }
 
-      const studentSafe = sanitizeFilename(studentName);
-      const outName = `PRA_${studentSafe}_${yearId}.pdf`.replace(/_+/g, '_');
+      // Formato del PDF regenerado: PRA_Apellido1Apellido2Nombre_AAAA-AAAA.pdf
+      // (sin materia porque al regenerar no siempre la sabemos; sí el año)
+      const studentCamel = formatStudentNameCamel(studentName);
+      const outName = `PRA_${studentCamel}_${yearId}.pdf`;
       doc.save(outName);
     } catch (e) {
       console.error('Error regenerando PDF:', e);
@@ -3955,9 +4198,13 @@
 
   function getFileName(ext) {
     const selectedData = getSelectedEvaluationsData();
-    if (selectedData.length === 0) return `sin_datos.${ext}`;
-    // FIX TILDES: sanitizeFilename en vez de /[^a-z0-9]/gi
-    const student = sanitizeFilename(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
+    if (selectedData.length === 0) return `PRA_sinDatosCcee${getFilterName()}.${ext}`;
+    // Formato: PRA_MAT_Apellido1Apellido2Nombre_CceeFiltro.ext
+    //   - MAT: siglas+curso de la materia (CYR3, TEC4, TYD3, REP...)
+    //   - Apellido1Apellido2Nombre: en PascalCase (notación dromedaria
+    //     empezando en mayúscula), con apellidos primero y luego nombre.
+    //   - CceeFiltro: filtro aplicado, también PascalCase.
+    const student = formatStudentNameCamel(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
     const subjectCodes = selectedData.map(e => getSubjectCode(e.subject, e.course));
     let uniqueSubjectCodes = [...new Set(subjectCodes)];
     if (isRepeater()) {
@@ -3965,12 +4212,15 @@
       if (!uniqueSubjectCodes.includes('REP')) uniqueSubjectCodes.push('REP');
     }
     uniqueSubjectCodes = uniqueSubjectCodes.filter(code => code && code.trim() !== '');
-    const subjectPart = uniqueSubjectCodes.join('_');
-    const filterNameWithPrefix = `CCEE_${getFilterName()}`;
-    let fileName = `${student}`;
-    if (subjectPart) fileName += `_${subjectPart}`;
-    fileName += `_${filterNameWithPrefix}.${ext}`;
-    return fileName.replace(/_+/g, '_');
+    // MAT: si hay varias materias, se unen con guión (sin _, para no confundir).
+    // Ej: ["CYR3", "TEC4"] → "CYR3-TEC4"
+    const matPart = uniqueSubjectCodes.join('-');
+    const filterPart = toCamelCase('CCEE ' + getFilterName());  // PascalCase: "CceeSuspensos"
+    let fileName = 'PRA';
+    if (matPart) fileName += '_' + matPart;
+    fileName += '_' + student;
+    fileName += '_' + filterPart + '.' + ext;
+    return fileName;
   }
 
   function getFilteredCriteriaForExport() {
