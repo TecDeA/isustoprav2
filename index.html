@@ -2123,15 +2123,38 @@
       const snap = await fbDb.ref(fbPath('courses')).get();
       const years = new Set();
       if (snap && snap.exists()) {
-        snap.forEach(yearChild => years.add(yearChild.key));
+        snap.forEach(yearChild => {
+          const yearId = yearChild.key;
+          const yearData = yearChild.val() || {};
+          // Un año "existe" si tiene meta o si tiene PRAs
+          if (yearData.meta || (yearData.pras && Object.keys(yearData.pras).length > 0)) {
+            years.add(yearId);
+          } else {
+            // Aunque no tenga meta ni PRAs, lo añadimos por si acaso
+            // (puede ser un curso recién creado con meta vacía)
+            years.add(yearId);
+          }
+        });
       }
-      years.add(getActiveAcademicYear());
+      // Añadir siempre el año activo (que es donde se guardan los PRAs nuevos)
+      const activeYear = getActiveAcademicYear();
+      years.add(activeYear);
+      console.log('[savedPras] Años disponibles:', Array.from(years).sort(), '| año activo:', activeYear);
 
       const sorted = Array.from(years).sort().reverse();
+      // Por defecto: si no hay selección previa, mostrar el año activo
+      // (que es donde se acaban de guardar los PRAs nuevos)
       const prevSel = savedPrasLastYearSelected || (force ? sel.value : null);
       sel.innerHTML = sorted.map(y => `<option value="${y}">${y}</option>`).join('');
-      if (prevSel && sorted.includes(prevSel)) sel.value = prevSel;
+      if (prevSel && sorted.includes(prevSel)) {
+        sel.value = prevSel;
+      } else if (sorted.includes(activeYear)) {
+        sel.value = activeYear;
+      } else if (sorted.length > 0) {
+        sel.value = sorted[0];  // el más reciente
+      }
       savedPrasLastYearSelected = sel.value;
+      console.log('[savedPras] Año seleccionado en el selector:', sel.value);
       await renderSavedPrasList();
     } catch (e) {
       console.error('Error cargando años:', e);
@@ -2152,13 +2175,20 @@
     }
     list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando PRAs…</div>';
     try {
-      const snap = await fbDb.ref(fbPath(`courses/${yearId}/pras`)).orderByChild('generatedAt').get();
+      const ref = fbDb.ref(fbPath(`courses/${yearId}/pras`));
+      const snap = await ref.orderByChild('generatedAt').get();
+      console.log('[savedPras] Consulta PRAs para año', yearId, '| existe:', !!(snap && snap.exists()), '| path:', fbPath(`courses/${yearId}/pras`));
       const pras = [];
       if (snap && snap.exists()) {
-        snap.forEach(c => pras.push({ id: c.key, ...c.val() }));
+        snap.forEach(c => {
+          const v = c.val();
+          console.log('[savedPras] PRA encontrado:', c.key, '| studentName:', v.studentName, '| generatedAt:', v.generatedAt);
+          pras.push({ id: c.key, ...v });
+        });
       }
       pras.sort((a, b) => (b.generatedAt || 0) - (a.generatedAt || 0));
       savedPrasCache[yearId] = pras;
+      console.log('[savedPras] Total PRAs encontrados:', pras.length);
 
       if (pras.length === 0) {
         list.innerHTML = '<p class="text-center text-slate-400 text-sm py-8">No hay PRAs guardados en este curso.</p>';
@@ -2399,6 +2429,7 @@
 
     // Modo creación: push nuevo
     const yearId = praData.academicYear || getActiveAcademicYear();
+    console.log('[savePRA] Guardando PRA nuevo bajo año:', yearId, '| path:', fbPath(`courses/${yearId}/pras`));
     const ref = fbDb.ref(fbPath(`courses/${yearId}/pras`)).push();
     await ref.set({
       ...praData,
@@ -2407,6 +2438,7 @@
       generatedByUsername: currentUser.username,
       academicYear: yearId
     });
+    console.log('[savePRA] PRA guardado OK. PraId:', ref.key, '| yearId:', yearId, '| studentName:', praData.studentName);
     // Guardar también la asociación grupo↔tutor/a para autocompletar futuros PRAs
     try { await saveGroupTutorAssociation(praData.group, praData.tutor, praData.academicYear || yearId); }
     catch (e) { console.warn('No se pudo guardar asociación grupo/tutor:', e); }
