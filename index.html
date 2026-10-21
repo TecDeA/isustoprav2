@@ -2066,10 +2066,34 @@
     try {
       await fbDb.ref(fbPath('meta/currentAcademicYear')).set(yearId);
       activeAcademicYear = yearId;
+
+      // === Actualizar TODO lo que depende del año activo ===
+
+      // 1. Chip del header
       refreshCourseChip();
+      // 2. Campo readonly de pantalla 1
+      if (studentCourseLabel) studentCourseLabel.value = yearId;
+
+      // 3. Invalidar caches de PRAs guardados para forzar refetch
+      savedPrasCache = {};
+      // 4. Resetear el selector del modal de PRAs para que use el nuevo año
+      savedPrasLastYearSelected = null;
+
+      // 5. Recargar sugerencias de grupo/tutor para el nuevo año
+      if (currentUser) loadGroupTutorSuggestions();
+
+      // 6. Refrescar la lista de cursos del modal de gestión
       await adminListCourses();
       await refreshCourseMgmtCurrent();
-      alert(`Curso vigente cambiado a ${yearId}.`);
+
+      // 7. Si el modal de PRAs guardados está abierto, refrescarlo
+      const savedPrasModal = document.getElementById('savedPrasModal');
+      if (savedPrasModal && !savedPrasModal.classList.contains('hidden')) {
+        console.log('[setActiveCourse] Modal de PRAs abierto: refrescando con nuevo año', yearId);
+        await loadSavedPrasYears(true);
+      }
+
+      alert(`Curso vigente cambiado a ${yearId}.\n\nLos nuevos PRAs se guardarán bajo este curso. Las sugerencias de grupos y tutores se han actualizado.`);
     } catch (e) {
       console.error('Error cambiando curso vigente:', e);
       alert('Error: ' + translateFirebaseError(e));
@@ -2278,6 +2302,9 @@
   function openSavedPrasModal() {
     document.getElementById('savedPrasModal').classList.remove('hidden');
     userMenu.classList.add('hidden-menu');
+    // Resetear la selección previa para que el selector muestre el año
+    // activo por defecto (no el último visto, que puede haber cambiado).
+    savedPrasLastYearSelected = null;
     loadSavedPrasYears();
   }
   function closeSavedPrasModal() {
