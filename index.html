@@ -4401,9 +4401,12 @@
               checkPageBreak(15);
               const subjectCode = getSubjectCode(subject, course);
               const fullSubjectName = getFullSubjectName(subject, course);
-              doc.setFont("helvetica", "bold"); doc.text(`${fullSubjectName} (${subjectCode})`, margin, y); y += 7;
+              doc.setFont("helvetica", "bold");
+              const subjText = `${fullSubjectName} (${subjectCode})`;
+              const subjLines = doc.splitTextToSize(subjText, 182);
+              doc.text(subjLines, margin, y); y += 7 * subjLines.length;
               const criteria = groupedCriteria[course][subject], codesList = criteria.map(c => c.code).join(", ");
-              checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 180 }); y += lineHeight * 2; y += 5;
+              checkPageBreak(10); doc.setFont("helvetica", "normal"); doc.text(codesList, margin, y, { maxWidth: 182 }); y += lineHeight * 2; y += 5;
             });
           });
         }
@@ -4434,34 +4437,34 @@
                 if (items.includes("Tareas (precisar)") && textAreaState.tareas) {
                   checkPageBreak(10); doc.text("Tareas específicas:", margin, y); y += lineHeight;
                   const lines = textAreaState.tareas.split('\n').filter(l => l.trim());
-                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y, { maxWidth: 172 }); y += lineHeight; n++; });
                   y += 5;
                 }
                 let normal = false;
                 items.forEach(item => {
                   if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
-                    checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                    checkPageBreak(10); doc.text(`- ${item}`, margin, y, { maxWidth: 182 }); y += lineHeight; normal = true;
                   }
                 });
                 if (normal) y += 5;
                 if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
                   checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
                   const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
-                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y, { maxWidth: 172 }); y += lineHeight; n++; });
                   y += 5;
                 }
               } else {
                 let normal = false;
                 items.forEach(item => {
                   if (!["Otros (especificar)","Otras (especificar)","Tareas (precisar)"].includes(item)) {
-                    checkPageBreak(10); doc.text(`- ${item}`, margin, y); y += lineHeight; normal = true;
+                    checkPageBreak(10); doc.text(`- ${item}`, margin, y, { maxWidth: 182 }); y += lineHeight; normal = true;
                   }
                 });
                 if (normal) y += 5;
                 if ((items.includes("Otros (especificar)") || items.includes("Otras (especificar)")) && textAreaState.otros[section]) {
                   checkPageBreak(10); doc.text("Otros aspectos:", margin, y); y += lineHeight;
                   const lines = textAreaState.otros[section].split('\n').filter(l => l.trim());
-                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y); y += lineHeight; n++; });
+                  let n = 1; lines.forEach(line => { checkPageBreak(10); doc.text(`${n}) ${line.trim()}`, margin + 10, y, { maxWidth: 172 }); y += lineHeight; n++; });
                   y += 5;
                 }
               }
