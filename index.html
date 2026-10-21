@@ -719,6 +719,69 @@
   </div>
 
   <!-- =============================================================
+       EXPORT MODAL (advanced criteria export)
+       ============================================================= -->
+  <div id="exportModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="bg-gradient-to-r from-violet-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center flex-shrink-0">
+        <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-file-export"></i> Exportar criterios</h2>
+        <button onclick="closeExportModal()" class="text-white hover:text-violet-200 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="overflow-y-auto flex-1 p-6 space-y-5">
+        <!-- Filtros de calificación -->
+        <div>
+          <h3 class="text-sm font-bold text-slate-700 mb-2 uppercase tracking-wider">Filtros de calificación</h3>
+          <p class="text-xs text-slate-500 mb-3">Marca uno o varios filtros. Los criterios que cumplan cualquiera de los seleccionados se exportarán.</p>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-50">
+              <input type="checkbox" id="exportFilterApproved" class="w-4 h-4 rounded">
+              <span class="text-sm text-emerald-700 font-medium"><i class="fa-solid fa-circle-check mr-1"></i>Aprobados (calificación ≥ 5)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-50 bg-rose-50">
+              <input type="checkbox" id="exportFilterFailed" class="w-4 h-4 rounded" checked>
+              <span class="text-sm text-rose-700 font-medium"><i class="fa-solid fa-circle-xmark mr-1"></i>Suspensos (calificación < 5)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-50 bg-slate-100">
+              <input type="checkbox" id="exportFilterUnevaluated" class="w-4 h-4 rounded" checked>
+              <span class="text-sm text-slate-700 font-medium"><i class="fa-solid fa-circle-question mr-1"></i>No evaluados</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Filtro por materias -->
+        <div>
+          <h3 class="text-sm font-bold text-slate-700 mb-2 uppercase tracking-wider">Materias</h3>
+          <p class="text-xs text-slate-500 mb-3">Deja todas sin marcar para exportar de todas las materias, o marca solo las que quieras.</p>
+          <div id="exportSubjectsList" class="space-y-1 max-h-40 overflow-y-auto">
+            <p class="text-xs text-slate-400">Cargando materias...</p>
+          </div>
+        </div>
+
+        <!-- Formato de exportación -->
+        <div>
+          <h3 class="text-sm font-bold text-slate-700 mb-2 uppercase tracking-wider">Formato</h3>
+          <div class="flex gap-3">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="exportFormat" value="json" class="w-4 h-4" checked>
+              <span class="text-sm font-medium"><i class="fa-solid fa-code mr-1"></i>JSON</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="exportFormat" value="csv" class="w-4 h-4">
+              <span class="text-sm font-medium"><i class="fa-solid fa-file-csv mr-1"></i>CSV</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="p-4 border-t border-slate-200 flex gap-2 justify-end flex-shrink-0">
+        <button onclick="closeExportModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm">Cancelar</button>
+        <button onclick="executeAdvancedExport()" class="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+          <i class="fa-solid fa-download"></i> Exportar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
        EXISTING MODALS (help, validation)
        ============================================================= -->
   <div id="helpModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -956,6 +1019,10 @@
             <button id="filterUnevaluated" onclick="filterCriteria('unevaluated', this)"
                     class="filter-button px-3.5 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">
               <i class="fa-solid fa-circle-question"></i> No evaluados
+            </button>
+            <button onclick="openExportModal()" id="btnAdvancedExport"
+                    class="filter-button px-3.5 py-2 rounded-lg text-sm font-semibold bg-violet-100 text-violet-700 hover:bg-violet-200 ml-auto">
+              <i class="fa-solid fa-file-export"></i> Exportar
             </button>
           </div>
 
@@ -4630,6 +4697,160 @@
     }
     filtered.sort((a, b) => a.code.localeCompare(b.code));
     return filtered;
+  }
+
+  /* ============================================================
+   * EXPORTACIÓN AVANZADA (multi-filtro + multi-materia)
+   * ============================================================ */
+  function openExportModal() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) { showError('No hay evaluaciones seleccionadas para exportar.'); return; }
+    // Rellenar la lista de materias
+    const subjectsList = document.getElementById('exportSubjectsList');
+    const subjects = [...new Set(selectedData.map(e => `${e.subject} (${e.course})`))];
+    subjectsList.innerHTML = subjects.map(s => {
+      const safeId = 'export-subj-' + s.replace(/[^a-zA-Z0-9]/g, '-');
+      return `
+        <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-slate-50">
+          <input type="checkbox" id="${safeId}" value="${s.replace(/"/g, '&quot;')}" class="w-4 h-4 rounded">
+          <span class="text-sm text-slate-700">${s}</span>
+        </label>
+      `;
+    }).join('');
+    // Por defecto: Suspensos y No evaluados marcados (ya lo están en el HTML)
+    document.getElementById('exportFilterApproved').checked = false;
+    document.getElementById('exportFilterFailed').checked = true;
+    document.getElementById('exportFilterUnevaluated').checked = true;
+    // Mostrar el modal
+    document.getElementById('exportModal').classList.remove('hidden');
+  }
+
+  function closeExportModal() {
+    document.getElementById('exportModal').classList.add('hidden');
+  }
+
+  function executeAdvancedExport() {
+    const selectedData = getSelectedEvaluationsData();
+    if (selectedData.length === 0) { alert('No hay evaluaciones seleccionadas.'); return; }
+
+    // Leer filtros de calificación seleccionados
+    const wantApproved = document.getElementById('exportFilterApproved').checked;
+    const wantFailed = document.getElementById('exportFilterFailed').checked;
+    const wantUnevaluated = document.getElementById('exportFilterUnevaluated').checked;
+
+    if (!wantApproved && !wantFailed && !wantUnevaluated) {
+      alert('Selecciona al menos un filtro de calificación.');
+      return;
+    }
+
+    // Leer materias seleccionadas (si ninguna marcada → todas)
+    const selectedSubjects = [];
+    document.querySelectorAll('#exportSubjectsList input[type="checkbox"]:checked').forEach(cb => {
+      selectedSubjects.push(cb.value);
+    });
+
+    // Leer formato
+    const format = document.querySelector('input[name="exportFormat"]:checked').value;
+
+    // Consolidar todos los criterios
+    let consolidated = [];
+    selectedData.forEach(evalItem => {
+      const subjectKey = `${evalItem.subject} (${evalItem.course})`;
+      // Si hay materas seleccionadas y esta no está, saltar
+      if (selectedSubjects.length > 0 && !selectedSubjects.includes(subjectKey)) return;
+      evalItem.criteria.forEach(c => {
+        consolidated.push({ ...c, student: evalItem.student, subject: evalItem.subject, course: evalItem.course });
+      });
+    });
+
+    // Filtrar por los criterios de calificación seleccionados (OR)
+    let filtered = consolidated.filter(c => {
+      const g = parseFloat(c.grade.replace(',', '.'));
+      if (isNaN(g)) {
+        // No evaluado
+        return wantUnevaluated;
+      }
+      if (g >= 5) return wantApproved;
+      return wantFailed;
+    });
+
+    if (filtered.length === 0) {
+      alert('No se encontraron criterios que cumplan los filtros seleccionados.');
+      return;
+    }
+
+    filtered.sort((a, b) => a.code.localeCompare(b.code));
+
+    // Construir nombre de archivo
+    const student = formatStudentNameCamel(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
+    const subjectCodes = selectedData.map(e => getSubjectCode(e.subject, e.course));
+    let uniqueSubjectCodes = [...new Set(subjectCodes)];
+    if (isRepeater()) {
+      uniqueSubjectCodes = uniqueSubjectCodes.map(code => (code === 'TYD4' || code === 'CYR4') ? 'REP' : code);
+      if (!uniqueSubjectCodes.includes('REP')) uniqueSubjectCodes.push('REP');
+    }
+    uniqueSubjectCodes = uniqueSubjectCodes.filter(code => code && code.trim() !== '');
+    const matPart = uniqueSubjectCodes.join('_');
+    // Construir sufijo de filtros
+    const filterParts = [];
+    if (wantApproved) filterParts.push('Aprobados');
+    if (wantFailed) filterParts.push('Suspensos');
+    if (wantUnevaluated) filterParts.push('NoEvaluados');
+    const filterSuffix = toCamelCase('CCEE ' + filterParts.join(' '));
+
+    let fileName = 'PRA';
+    if (matPart) fileName += '_' + matPart;
+    fileName += '_' + student;
+    fileName += '_' + filterSuffix;
+    // Si hay materias específicas seleccionadas, añadir sufijo
+    if (selectedSubjects.length > 0 && selectedSubjects.length < subjectsCount()) {
+      fileName += '_Filtrado';
+    }
+    fileName += '.' + format;
+
+    // Exportar
+    if (format === 'json') {
+      const data = {
+        metadata: {
+          alumno: evaluations.length > 0 ? evaluations[0].student : 'Desconocido',
+          materias: [...new Set(selectedData.map(e => e.subject))],
+          cursos: [...new Set(selectedData.map(e => e.course))],
+          archivos_origen: selectedData.map(e => e.fileName),
+          filtros_aplicados: filterParts,
+          materas_filtradas: selectedSubjects.length > 0 ? selectedSubjects : 'Todas',
+          curso_academico: getActiveAcademicYear(),
+          total_criterios: filtered.length
+        },
+        criteria: filtered.map(c => ({ materia: c.subject, codigo: c.code, descripcion: c.description, calificacion: c.grade }))
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    } else {
+      // CSV
+      let csv = "Materia;Codigo;Descripcion;Calificacion;Alumno;Curso\n";
+      const esc = (text) => text ? '"' + String(text).replace(/"/g, '""') + '"' : "";
+      filtered.forEach(c => {
+        const row = [esc(c.subject), esc(c.code), esc(c.description), esc(c.grade), esc(c.student), esc(c.course)];
+        csv += row.join(";") + "\n";
+      });
+      const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+      const blob = new Blob([bom, csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    closeExportModal();
+    alert(`Se han exportado ${filtered.length} criterio(s) en formato ${format.toUpperCase()}.\n\nArchivo: ${fileName}`);
+  }
+
+  function subjectsCount() {
+    const selectedData = getSelectedEvaluationsData();
+    return [...new Set(selectedData.map(e => `${e.subject} (${e.course})`))].length;
   }
 
   function exportJSON() {
