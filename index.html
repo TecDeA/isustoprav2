@@ -4638,69 +4638,6 @@
   }
 
   /* ============================================================
-   * EXPORT HELPERS (FIX TILDES aplicado)
-   * ============================================================ */
-  function getFilterName() {
-    switch (currentFilter) {
-      case 'approved': return 'Aprobados';
-      case 'failed': return 'Suspensos';
-      case 'unevaluated': return 'NoEvaluados';
-      default: return 'Todos';
-    }
-  }
-
-  function getFileName(ext) {
-    const selectedData = getSelectedEvaluationsData();
-    if (selectedData.length === 0) return `PRA_sinDatosCcee${getFilterName()}.${ext}`;
-    // Formato: PRA_MAT_Apellido1Apellido2Nombre_CceeFiltro.ext
-    //   - MAT: siglas+curso de la materia (CYR3, TEC4, TYD3, REP...)
-    //   - Apellido1Apellido2Nombre: en PascalCase (notación dromedaria
-    //     empezando en mayúscula), con apellidos primero y luego nombre.
-    //   - CceeFiltro: filtro aplicado, también PascalCase.
-    const student = formatStudentNameCamel(evaluations.length > 0 ? evaluations[0].student : 'Desconocido');
-    const subjectCodes = selectedData.map(e => getSubjectCode(e.subject, e.course));
-    let uniqueSubjectCodes = [...new Set(subjectCodes)];
-    if (isRepeater()) {
-      uniqueSubjectCodes = uniqueSubjectCodes.map(code => (code === 'TYD4' || code === 'CYR4') ? 'REP' : code);
-      if (!uniqueSubjectCodes.includes('REP')) uniqueSubjectCodes.push('REP');
-    }
-    uniqueSubjectCodes = uniqueSubjectCodes.filter(code => code && code.trim() !== '');
-    // MAT: si hay varias materias, se unen con guión bajo.
-    // Ej: ["CYR3", "TEC4"] → "CYR3_TEC4"
-    const matPart = uniqueSubjectCodes.join('_');
-    const filterPart = toCamelCase('CCEE ' + getFilterName());  // PascalCase: "CceeSuspensos"
-    let fileName = 'PRA';
-    if (matPart) fileName += '_' + matPart;
-    fileName += '_' + student;
-    fileName += '_' + filterPart + '.' + ext;
-    return fileName;
-  }
-
-  function getFilteredCriteriaForExport() {
-    const selectedData = getSelectedEvaluationsData();
-    if (selectedData.length === 0) return [];
-    let consolidated = [];
-    selectedData.forEach(evalItem => {
-      evalItem.criteria.forEach(c => consolidated.push({ ...c, student: evalItem.student, subject: evalItem.subject, course: evalItem.course }));
-    });
-    let filtered = [];
-    switch (currentFilter) {
-      case 'approved':
-        filtered = consolidated.filter(c => { const g = parseFloat(c.grade.replace(',', '.')); return !isNaN(g) && g >= 5; });
-        break;
-      case 'failed':
-        filtered = consolidated.filter(c => { const g = parseFloat(c.grade.replace(',', '.')); return !isNaN(g) && g < 5; });
-        break;
-      case 'unevaluated':
-        filtered = consolidated.filter(c => c.grade === "No evaluado");
-        break;
-      default: filtered = consolidated; break;
-    }
-    filtered.sort((a, b) => a.code.localeCompare(b.code));
-    return filtered;
-  }
-
-  /* ============================================================
    * EXPORTACIÓN AVANZADA (multi-filtro + multi-materia)
    * ============================================================ */
   function openExportModal() {
@@ -4857,45 +4794,6 @@
   function subjectsCount() {
     const selectedData = getSelectedEvaluationsData();
     return [...new Set(selectedData.map(e => `${e.subject} (${e.course})`))].length;
-  }
-
-  function exportJSON() {
-    const selectedData = getSelectedEvaluationsData();
-    if (selectedData.length === 0) { showError('No hay evaluaciones seleccionadas para exportar.'); return; }
-    const criteria = getFilteredCriteriaForExport();
-    const data = {
-      metadata: {
-        alumno: evaluations.length > 0 ? evaluations[0].student : 'Desconocido',
-        materias: [...new Set(selectedData.map(e => e.subject))],
-        cursos: [...new Set(selectedData.map(e => e.course))],
-        archivos_origen: selectedData.map(e => e.fileName),
-        filtro_aplicado: getFilterName(),
-        curso_academico: getActiveAcademicYear()
-      },
-      criteria: criteria.map(c => ({ materia: c.subject, codigo: c.code, descripcion: c.description, calificacion: c.grade }))
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = url; a.download = getFileName('json'); document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
-
-  function exportCSV() {
-    const selectedData = getSelectedEvaluationsData();
-    if (selectedData.length === 0) { showError('No hay evaluaciones seleccionadas para exportar.'); return; }
-    const criteria = getFilteredCriteriaForExport();
-    const filterName = getFilterName();
-    let csv = "Materia;Código;Descripción;Calificación;Alumno;Curso;Filtro_Aplicado\n";
-    const esc = (text) => text ? '"' + String(text).replace(/"/g, '""') + '"' : "";
-    criteria.forEach(c => {
-      const row = [esc(c.subject), esc(c.code), esc(c.description), esc(c.grade), esc(c.student), esc(c.course), esc(filterName)];
-      csv += row.join(";") + "\n";
-    });
-    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
-    const blob = new Blob([bom, csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = url; a.download = getFileName('csv'); document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
   /* ============================================================
