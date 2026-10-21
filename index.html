@@ -4420,7 +4420,16 @@
           doc.text("OTROS ASPECTOS A TRABAJAR EN EL PROGRAMA", 105, y+1, { align: "center" });
           y += 15; doc.setTextColor(0, 0, 0);
 
-          for (const [section, items] of Object.entries(selectedAdditionalFields)) {
+          // Iterar en el orden definido por additionalFieldsData (pantalla 4)
+          // para que las secciones aparezcan siempre en el mismo orden:
+          // 1) Tipo de actividades y tareas
+          // 2) Formas de acceso a la información
+          // 3) Recursos didácticos
+          // 4) Agrupamientos, distribución de espacios y tiempos
+          // 5) Instrumentos de evaluación
+          for (const section of Object.keys(additionalFieldsData)) {
+            const items = selectedAdditionalFields[section];
+            if (!items || items.length === 0) continue;
             checkPageBreak(15); doc.setFont("helvetica", "bold"); doc.text(section, margin, y); y += 7;
             if (items.length === 0) { doc.setFont("helvetica", "italic"); y = addText("No se han seleccionado elementos específicos.", false, y); }
             else {
