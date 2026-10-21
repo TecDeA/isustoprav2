@@ -2253,6 +2253,11 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded ${roleColor}">${roleLabel}</span>
+              <button onclick="adminEditUser('${u.uid}', '${safeUser}')" ${isMe ? 'disabled' : ''}
+                class="text-slate-400 hover:text-blue-600 p-1.5 rounded-full hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                title="${isMe ? 'No puedes editarte a ti mismo aquí' : 'Editar usuario'}">
+                <i class="fa-solid fa-pen"></i>
+              </button>
               <button onclick="adminDeleteUser('${u.uid}', '${safeUser}')" ${isMe ? 'disabled' : ''}
                 class="text-slate-400 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
                 title="${isMe ? 'No puedes eliminarte a ti mismo' : 'Eliminar usuario'}">
@@ -2265,6 +2270,138 @@
     } catch (e) {
       console.error('Error listando usuarios:', e);
       list.innerHTML = `<p class="text-center text-red-500 text-sm py-4">Error al cargar usuarios: ${e.message}</p>`;
+    }
+  }
+
+  /**
+   * Editar un usuario existente: permite cambiar el username y/o la
+   * contraseña. Usa el patrón "secondary app" para no cerrar la sesión
+   * del admin actual.
+   *
+   * Limitaciones del cliente Firebase:
+   *   - No se puede cambiar el email de un usuario sin iniciar sesión como
+   *     ese usuario. Como el email es <username>@tecdea.local, cambiar el
+   *     username requeriría cambiar también el email.
+   *   - Para cambiar email: hay que hacer signInWithEmailAndPassword con
+   *     la contraseña actual del usuario, luego updateEmail, luego signOut.
+   *   - Para cambiar contraseña: igual, signIn + updatePassword + signOut.
+   *
+   * Para evitar pedirle al admin la contraseña actual del usuario (que no
+   * debería conocer), pedimos la NUEVA contraseña y la usamos para
+   * iniciar sesión temporalmente + cambiar email + cambiar password.
+   * Si solo quiere cambiar el username (no la contraseña), necesitamos
+   * que introduzca la contraseña actual para poder hacer el signIn.
+   */
+  async function adminEditUser(uid, currentUsername) {
+    if (!requireAdmin()) return;
+    if (uid === currentUser.uid) {
+      alert('No puedes editarte a ti mismo desde aquí.\n\nPara cambiar tu propia contraseña, usa el cierre de sesión y la consola de Firebase, o contacta con otro administrador.');
+      return;
+    }
+
+    // Obtener datos actuales del usuario desde el cache
+    const u = usersCache[uid];
+    if (!u) return alert('Usuario no encontrado en caché. Recarga la lista.');
+    const currentEmail = u.email || usernameToEmail(currentUsername);
+
+    // Pedir nuevos datos al admin mediante prompts
+    const newUsername = prompt(`Editar usuario\n\nUsuario actual: ${currentUsername}\n\nIntroduce el nuevo usuario (o deja igual para no cambiarlo):`, currentUsername);
+    if (newUsername === null) return; // cancelado
+
+    const newPass1 = prompt(`Editar usuario "${currentUsername}"\n\nIntroduce la nueva contraseña (o deja en blanco para no cambiarla):\n\nNota: si vas a cambiar el usuario, debes introducir la contraseña actual o una nueva, porque se necesita para reautenticar.`, '');
+    if (newPass1 === null) return; // cancelado
+
+    let newPass2 = '';
+    if (newPass1 && newPass1.length > 0) {
+      newPass2 = prompt(`Editar usuario "${currentUsername}"\n\nRepite la nueva contraseña:`, '');
+      if (newPass2 === null) return; // cancelado
+      if (newPass1 !== newPass2) return alert('Las contraseñas no coinciden.');
+      if (newPass1.length < 6) return alert('La contraseña debe tener al menos 6 caracteres.');
+    }
+
+    // Validar el nuevo username si cambió
+    const trimmedUsername = newUsername.trim();
+    const usernameChanged = trimmedUsername !== currentUsername && trimmedUsername.length > 0;
+    const passwordChanged = newPass1 && newPass1.length > 0;
+
+    if (!usernameChanged && !passwordChanged) {
+      alert('No se han realizado cambios.');
+      return;
+    }
+
+    if (usernameChanged) {
+      if (trimmedUsername.length < 3) return alert('El usuario debe tener al menos 3 caracteres.');
+      if (!/^[a-z0-9._-]+$/.test(trimmedUsername)) return alert('Solo minúsculas, números, ".", "_" y "-".');
+    }
+
+    // Si se cambia el username, necesitamos la contraseña para reautenticar
+    // (porque hay que cambiar el email en Firebase Auth).
+    // Si solo se cambia la contraseña, también necesitamos la contraseña
+    // actual para hacer signIn.
+    // En ambos casos, pedimos al admin que introduzca la contraseña.
+    const passwordToUse = passwordChanged ? newPass1 : newPass1;
+    if (!passwordToUse) {
+      // Si no hay contraseña nueva y no se introdujo la actual, no podemos
+      // hacer nada (Firebase Auth requiere reautenticación para cambios).
+      alert('Para editar un usuario necesitas introducir una contraseña (la actual o una nueva).\n\nFirebase Auth requiere reautenticación para cambiar email o contraseña.');
+      return;
+    }
+
+    // Usar secondary app para no cerrar la sesión del admin
+    let secondaryApp = null;
+    try {
+      secondaryApp = firebase.initializeApp(firebaseConfig, 'isustopra-edit-' + Date.now());
+      const secondaryAuth = secondaryApp.auth();
+
+      // 1. Iniciar sesión como el usuario a editar
+      await secondaryAuth.signInWithEmailAndPassword(currentEmail, passwordToUse);
+      const editUser = secondaryAuth.currentUser;
+
+      // 2. Si cambió el username, cambiar el email
+      if (usernameChanged) {
+        const newEmail = usernameToEmail(trimmedUsername);
+        await editUser.updateEmail(newEmail);
+        // Actualizar metadata en la BD
+        await fbDb.ref(fbPath(`users/${uid}`)).update({
+          username: trimmedUsername,
+          email: newEmail,
+          updatedAt: firebase.database.ServerValue.TIMESTAMP,
+          updatedBy: currentUser.uid
+        });
+      }
+
+      // 3. Si hay contraseña nueva, actualizarla
+      if (passwordChanged) {
+        await editUser.updatePassword(newPass1);
+      }
+
+      // 4. Si solo se cambió la contraseña (no el username), actualizar
+      // el timestamp en la BD.
+      if (!usernameChanged && passwordChanged) {
+        await fbDb.ref(fbPath(`users/${uid}`)).update({
+          updatedAt: firebase.database.ServerValue.TIMESTAMP,
+          updatedBy: currentUser.uid
+        });
+      }
+
+      await secondaryAuth.signOut();
+
+      alert(`Usuario "${currentUsername}" actualizado correctamente.${usernameChanged ? `\n\nNuevo usuario: ${trimmedUsername}` : ''}${passwordChanged ? '\n\nContraseña actualizada.' : ''}`);
+      await adminListUsers();
+    } catch (e) {
+      console.error('Error editando usuario:', e);
+      const code = e.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        alert('La contraseña introducida no coincide con la del usuario. No se pueden hacer cambios sin la contraseña correcta.');
+      } else if (code === 'auth/requires-recent-login') {
+        alert('Firebase requiere un login reciente para este cambio. Inténtalo de nuevo.');
+      } else {
+        alert('Error al editar usuario: ' + translateFirebaseError(e));
+      }
+    } finally {
+      if (secondaryApp) {
+        try { await secondaryApp.delete(); } catch (_) {}
+      }
     }
   }
 
