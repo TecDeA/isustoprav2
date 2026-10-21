@@ -454,12 +454,12 @@
        USER MANAGEMENT MODAL (admin only)
        ============================================================= -->
   <div id="userMgmtModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto">
-      <div class="bg-gradient-to-r from-violet-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+      <div class="bg-gradient-to-r from-violet-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center flex-shrink-0">
         <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-users-gear"></i> Gestión de usuarios</h2>
         <button onclick="closeUserManagementModal()" class="text-white hover:text-violet-200 text-2xl leading-none">&times;</button>
       </div>
-      <div class="p-6 space-y-6">
+      <div class="overflow-y-auto flex-1"><div class="p-6 space-y-6">
         <!-- Create user form -->
         <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
           <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-user-plus text-emerald-600"></i> Crear nuevo usuario</h3>
@@ -507,18 +507,19 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 
   <!-- =============================================================
        SAVED PRAs MODAL (filter by academic year)
        ============================================================= -->
   <div id="savedPrasModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-y-auto">
-      <div class="bg-gradient-to-r from-blue-600 to-cyan-600 text-white p-4 rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-600 to-cyan-600 text-white p-4 rounded-t-2xl flex justify-between items-center flex-shrink-0">
         <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-folder-open"></i> PRAs guardados</h2>
         <button onclick="closeSavedPrasModal()" class="text-white hover:text-blue-200 text-2xl leading-none">&times;</button>
       </div>
-      <div class="p-6 space-y-4">
+      <div class="overflow-y-auto flex-1"><div class="p-6 space-y-4">
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold text-slate-600">Curso académico:</span>
@@ -533,18 +534,19 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 
   <!-- =============================================================
        COURSE MANAGEMENT MODAL (admin: full CRUD; user: read-only)
        ============================================================= -->
   <div id="courseMgmtModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto">
-      <div class="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-4 rounded-t-2xl flex justify-between items-center sticky top-0 z-10">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-4 rounded-t-2xl flex justify-between items-center flex-shrink-0">
         <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-calendar-days"></i> Gestión de cursos académicos</h2>
         <button onclick="closeCourseMgmtModal()" class="text-white hover:text-emerald-200 text-2xl leading-none">&times;</button>
       </div>
-      <div class="p-6 space-y-6">
+      <div class="overflow-y-auto flex-1"><div class="p-6 space-y-6">
 
         <!-- Curso vigente actual -->
         <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
@@ -625,18 +627,19 @@
 
       </div>
     </div>
+    </div>
   </div>
 
   <!-- =============================================================
        EXISTING MODALS (help, validation)
        ============================================================= -->
   <div id="helpModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-    <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto dark-mode-compatible">
+    <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden dark-mode-compatible">
       <div class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center">
         <h2 class="text-xl font-bold">Ayuda — De ISUS a PRA</h2>
         <button onclick="closeHelp()" class="text-white hover:text-blue-200 text-2xl">&times;</button>
       </div>
-      <div class="p-6 space-y-4">
+      <div class="overflow-y-auto flex-1"><div class="p-6 space-y-4">
         <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
           <h3 class="font-bold text-blue-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-circle-info"></i> ¿Qué es De ISUS a PRA?</h3>
           <p class="text-blue-700 text-sm">Genera Programas de Refuerzo del Aprendizaje (PRA) según el formato Séneca a partir de informes de suspensos procedentes también de Séneca (PDF), consolidando criterios, perfiles y actividades. Los PRAs se guardan en Firebase, aislados por curso académico (1 de septiembre – 31 de agosto).</p>
@@ -689,6 +692,7 @@
           <button onclick="closeHelp()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold">Entendido, ¡empecemos!</button>
         </div>
       </div>
+    </div>
     </div>
   </div>
 
@@ -2324,9 +2328,20 @@
     const usernameChanged = trimmedUsername !== currentUsername && trimmedUsername.length > 0;
     const passwordChanged = newPass1 && newPass1.length > 0;
 
-    if (!usernameChanged && !passwordChanged) {
+    // Preguntar si se quiere cambiar el rol
+    const currentRole = u.role || 'user';
+    const newRoleInput = prompt(`Editar usuario "${currentUsername}"\n\nRol actual: ${currentRole === 'admin' ? 'Administrador' : 'Usuario'}\n\nIntroduce el nuevo rol ("admin" o "usuario"), o deja igual para no cambiarlo:`, currentRole);
+    if (newRoleInput === null) return; // cancelado
+    const newRole = newRoleInput.trim().toLowerCase();
+    const roleChanged = (newRole === 'admin' || newRole === 'user') && newRole !== currentRole;
+
+    if (!usernameChanged && !passwordChanged && !roleChanged) {
       alert('No se han realizado cambios.');
       return;
+    }
+
+    if (newRole !== 'admin' && newRole !== 'user') {
+      return alert('Rol no válido. Debe ser "admin" o "usuario".');
     }
 
     if (usernameChanged) {
@@ -2357,17 +2372,17 @@
       await secondaryAuth.signInWithEmailAndPassword(currentEmail, passwordToUse);
       const editUser = secondaryAuth.currentUser;
 
-      // 2. Si cambió el username, cambiar el email
+      // 2. Preparar actualizaciones de metadata en la BD
+      const dbUpdates = {
+        updatedAt: firebase.database.ServerValue.TIMESTAMP,
+        updatedBy: currentUser.uid
+      };
       if (usernameChanged) {
         const newEmail = usernameToEmail(trimmedUsername);
+        // Cambiar el email en Firebase Auth
         await editUser.updateEmail(newEmail);
-        // Actualizar metadata en la BD
-        await fbDb.ref(fbPath(`users/${uid}`)).update({
-          username: trimmedUsername,
-          email: newEmail,
-          updatedAt: firebase.database.ServerValue.TIMESTAMP,
-          updatedBy: currentUser.uid
-        });
+        dbUpdates.username = trimmedUsername;
+        dbUpdates.email = newEmail;
       }
 
       // 3. Si hay contraseña nueva, actualizarla
@@ -2375,18 +2390,17 @@
         await editUser.updatePassword(newPass1);
       }
 
-      // 4. Si solo se cambió la contraseña (no el username), actualizar
-      // el timestamp en la BD.
-      if (!usernameChanged && passwordChanged) {
-        await fbDb.ref(fbPath(`users/${uid}`)).update({
-          updatedAt: firebase.database.ServerValue.TIMESTAMP,
-          updatedBy: currentUser.uid
-        });
+      // 4. Si cambió el rol, actualizarlo en la BD
+      if (roleChanged) {
+        dbUpdates.role = newRole;
       }
+
+      // 5. Aplicar todas las actualizaciones de metadata en la BD
+      await fbDb.ref(fbPath(`users/${uid}`)).update(dbUpdates);
 
       await secondaryAuth.signOut();
 
-      alert(`Usuario "${currentUsername}" actualizado correctamente.${usernameChanged ? `\n\nNuevo usuario: ${trimmedUsername}` : ''}${passwordChanged ? '\n\nContraseña actualizada.' : ''}`);
+      alert(`Usuario "${currentUsername}" actualizado correctamente.${usernameChanged ? `\n\nNuevo usuario: ${trimmedUsername}` : ''}${passwordChanged ? '\n\nContraseña actualizada.' : ''}${roleChanged ? `\n\nNuevo rol: ${newRole === 'admin' ? 'Administrador' : 'Usuario'}` : ''}`);
       await adminListUsers();
     } catch (e) {
       console.error('Error editando usuario:', e);
