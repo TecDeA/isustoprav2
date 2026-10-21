@@ -946,14 +946,6 @@
               <i class="fa-solid fa-eye text-blue-600"></i>
               Consolidando: <span id="currentSelectionCount" class="font-bold text-slate-800">0 Materias</span>
             </div>
-            <div class="flex gap-2">
-              <button onclick="exportJSON()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
-                <i class="fa-solid fa-code"></i> JSON
-              </button>
-              <button onclick="exportCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">
-                <i class="fa-solid fa-file-csv"></i> CSV
-              </button>
-            </div>
           </div>
 
           <div class="bg-white/80 rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -4800,12 +4792,17 @@
     }
     uniqueSubjectCodes = uniqueSubjectCodes.filter(code => code && code.trim() !== '');
     const matPart = uniqueSubjectCodes.join('_');
-    // Construir sufijo de filtros
+    // Construir sufijo de filtros con el formato solicitado:
+    // TODOS (si los 3), o combinaciones como APROB_SUSP, SUSP_NoEVAL, etc.
     const filterParts = [];
-    if (wantApproved) filterParts.push('Aprobados');
-    if (wantFailed) filterParts.push('Suspensos');
-    if (wantUnevaluated) filterParts.push('NoEvaluados');
-    const filterSuffix = toCamelCase('CCEE ' + filterParts.join(' '));
+    if (wantApproved && wantFailed && wantUnevaluated) {
+      filterParts.push('TODOS');
+    } else {
+      if (wantApproved) filterParts.push('APROB');
+      if (wantFailed) filterParts.push('SUSP');
+      if (wantUnevaluated) filterParts.push('NoEVAL');
+    }
+    const filterSuffix = filterParts.join('_');
 
     let fileName = 'PRA';
     if (matPart) fileName += '_' + matPart;
