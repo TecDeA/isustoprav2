@@ -2680,9 +2680,6 @@
     if (!fbDb) return;
     const groupsList = document.getElementById('groupsList');
     const tutorsList = document.getElementById('tutorsList');
-    // Los datalist están dentro de #resultsSection, que existe desde el
-    // inicio (aunque oculto). Si por alguna razón no se encontraran,
-    // reintentar hasta 5 veces con backoff (Bug A: evitar bucle infinito).
     if (!groupsList || !tutorsList) {
       if (!loadGroupTutorSuggestions._retries) loadGroupTutorSuggestions._retries = 0;
       if (loadGroupTutorSuggestions._retries < 5) {
@@ -2693,29 +2690,47 @@
     }
     loadGroupTutorSuggestions._retries = 0;
     try {
+      const activeYear = getActiveAcademicYear();
       const snap = await fbDb.ref(fbPath('groupTutor')).get();
       const groups = [];
       const tutors = [];
       if (snap && snap.exists()) {
         const data = snap.val();
+        // Filtrar grupos: solo incluir los que tengan al menos un tutor
+        // asociado en el año académico activo (lastYear === activeYear).
         if (data.groups) {
           Object.keys(data.groups).forEach(k => {
-            const lbl = data.groups[k].label;
-            const cnt = data.groups[k].tutors
-              ? Object.keys(data.groups[k].tutors).length : 0;
-            if (lbl) groups.push({ label: lbl, count: cnt });
+            const gNode = data.groups[k];
+            const lbl = gNode.label;
+            if (!lbl) return;
+            let yearCount = 0;
+            if (gNode.tutors) {
+              Object.keys(gNode.tutors).forEach(tk => {
+                const tAssoc = gNode.tutors[tk];
+                if (tAssoc && tAssoc.lastYear === activeYear) yearCount++;
+              });
+            }
+            if (yearCount > 0) groups.push({ label: lbl, count: yearCount });
           });
         }
+        // Filtrar tutores: igual, solo los que tengan al menos un grupo
+        // asociado en el año académico activo.
         if (data.tutors) {
           Object.keys(data.tutors).forEach(k => {
-            const lbl = data.tutors[k].label;
-            const cnt = data.tutors[k].groups
-              ? Object.keys(data.tutors[k].groups).length : 0;
-            if (lbl) tutors.push({ label: lbl, count: cnt });
+            const tNode = data.tutors[k];
+            const lbl = tNode.label;
+            if (!lbl) return;
+            let yearCount = 0;
+            if (tNode.groups) {
+              Object.keys(tNode.groups).forEach(gk => {
+                const gAssoc = tNode.groups[gk];
+                if (gAssoc && gAssoc.lastYear === activeYear) yearCount++;
+              });
+            }
+            if (yearCount > 0) tutors.push({ label: lbl, count: yearCount });
           });
         }
       }
-      // Ordenar: primero los que tienen más asociaciones (más usados)
       groups.sort((a, b) => b.count - a.count);
       tutors.sort((a, b) => b.count - a.count);
       const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -2723,14 +2738,14 @@
         .map(g => `<option value="${esc(g.label)}"></option>`).join('');
       tutorsList.innerHTML = tutors
         .map(t => `<option value="${esc(t.label)}"></option>`).join('');
-      console.log(`[groupTutor] Sugerencias cargadas: ${groups.length} grupos, ${tutors.length} tutores`);
+      console.log(`[groupTutor] Sugerencias cargadas para ${activeYear}: ${groups.length} grupos, ${tutors.length} tutores`);
     } catch (e) {
       console.warn('No se pudieron cargar sugerencias grupo/tutor:', e);
     }
   }
 
   /** Filtra los tutores sugeridos según el grupo actual, y viceversa.
-   *  Se llama al cambiar el contenido de cualquiera de los dos inputs. */
+   *  Solo sugiere asociaciones del año académico activo. */
   async function filterGroupTutorSuggestions(changed) {
     if (!fbDb) return;
     const groupInput = document.getElementById('studentGroup');
@@ -2741,35 +2756,46 @@
 
     const gKey = normalizeKey(groupInput.value);
     const tKey = normalizeKey(tutorInput.value);
+    const activeYear = getActiveAcademicYear();
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 
     try {
-      // Si cambió el grupo y hay un grupo válido, sugerir los tutores de ese grupo
+      // Si cambió el grupo y hay un grupo válido, sugerir los tutores de
+      // ese grupo PERO solo los del año académico activo.
       if (changed === 'group' && gKey) {
         const snap = await fbDb.ref(fbPath(`groupTutor/groups/${gKey}/tutors`)).get();
         const tutors = [];
         if (snap && snap.exists()) {
           snap.forEach(c => {
             const v = c.val();
-            if (v && v.label) tutors.push({ label: v.label, count: v.count || 0 });
+            // Solo sugerir tutores cuya última asociación con este grupo
+            // fue en el año académico activo.
+            if (v && v.label && v.lastYear === activeYear) {
+              tutors.push({ label: v.label, count: v.count || 0 });
+            }
           });
         }
-        // Si el grupo no tiene tutores conocidos, cargar todos
+        // Si no hay tutores de este año para este grupo, cargar todos
+        // los del año (el usuario puede estar creando una asociación nueva).
         if (tutors.length === 0) {
           await loadGroupTutorSuggestions();
         } else {
           tutors.sort((a, b) => b.count - a.count);
           tutorsList.innerHTML = tutors
-            .map(t => `<option value="${t.label.replace(/"/g, '&quot;')}"></option>`).join('');
+            .map(t => `<option value="${esc(t.label)}"></option>`).join('');
         }
       }
-      // Si cambió el tutor y hay un tutor válido, sugerir los grupos de ese tutor
+      // Si cambió el tutor y hay un tutor válido, sugerir los grupos de
+      // ese tutor PERO solo los del año académico activo.
       if (changed === 'tutor' && tKey) {
         const snap = await fbDb.ref(fbPath(`groupTutor/tutors/${tKey}/groups`)).get();
         const groups = [];
         if (snap && snap.exists()) {
           snap.forEach(c => {
             const v = c.val();
-            if (v && v.label) groups.push({ label: v.label, count: v.count || 0 });
+            if (v && v.label && v.lastYear === activeYear) {
+              groups.push({ label: v.label, count: v.count || 0 });
+            }
           });
         }
         if (groups.length === 0) {
@@ -2777,7 +2803,7 @@
         } else {
           groups.sort((a, b) => b.count - a.count);
           groupsList.innerHTML = groups
-            .map(g => `<option value="${g.label.replace(/"/g, '&quot;')}"></option>`).join('');
+            .map(g => `<option value="${esc(g.label)}"></option>`).join('');
         }
       }
     } catch (e) {
