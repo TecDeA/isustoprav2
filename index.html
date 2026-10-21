@@ -3120,11 +3120,25 @@
           restoreTextAreaState();
           setupTextAreaEvents();
           // Reaplicar modo solo lectura si el usuario no es admin
-          // (loadAdditionalFields regenera los checkboxes, así que hay
-          // que deshabilitarlos de nuevo tras el render).
           if (currentUser && currentUser.role !== 'admin') {
             setReadOnlyMode(true);
           }
+          // Poner el focus al principio de la lista: primer checkbox de
+          // "TIPO DE ACTIVIDADES Y TAREAS".
+          const firstSection = document.querySelector('#additional-fields-container .additional-field-section');
+          if (firstSection) {
+            const firstCheckbox = firstSection.querySelector('input[type="checkbox"]');
+            if (firstCheckbox) {
+              firstCheckbox.focus();
+            } else {
+              // Si no hay checkbox (raro), focus en el título de la sección
+              const firstH3 = firstSection.querySelector('h3');
+              if (firstH3) firstH3.focus();
+            }
+          }
+          // Reaplicar estado de "Nada que..." (deshabilitar otros ítems
+          // si "Nada que..." está marcado en alguna sección).
+          applyNadaQueLocks();
         }, 100);
       }
     }
@@ -3816,8 +3830,93 @@
   }
   function updateAdditionalField(section, checkbox) {
     if (!selectedAdditionalFields[section]) selectedAdditionalFields[section] = [];
-    if (checkbox.checked) selectedAdditionalFields[section].push(checkbox.value);
-    else selectedAdditionalFields[section] = selectedAdditionalFields[section].filter(item => item !== checkbox.value);
+    if (checkbox.checked) {
+      selectedAdditionalFields[section].push(checkbox.value);
+      // Si el ítem marcado es "Nada que..." → desmarcar y bloquear
+      // todos los demás ítems de la sección (excepto el propio "Nada que...").
+      if (checkbox.value.startsWith('Nada que')) {
+        enforceNadaQueExclusive(section, checkbox);
+      } else {
+        // Si se marca un ítem normal y "Nada que..." estaba marcado,
+        // desmarcar "Nada que..." (no pueden coexistir).
+        const nadaItem = selectedAdditionalFields[section].find(i => i.startsWith('Nada que'));
+        if (nadaItem) {
+          selectedAdditionalFields[section] = selectedAdditionalFields[section].filter(i => i !== nadaItem);
+          const nadaCb = document.getElementById(`${section}-${nadaItem.replace(/\s+/g, '-')}`);
+          if (nadaCb) nadaCb.checked = false;
+        }
+      }
+    } else {
+      selectedAdditionalFields[section] = selectedAdditionalFields[section].filter(item => item !== checkbox.value);
+      // Si se desmarca "Nada que..." → rehabilitar todos los demás ítems
+      if (checkbox.value.startsWith('Nada que')) {
+        applyNadaQueLocks();
+      }
+    }
+  }
+
+  /**
+   * Cuando se marca "Nada que..." en una sección, desmarca y deshabilita
+   * todos los demás checkboxes de esa sección.
+   */
+  function enforceNadaQueExclusive(section, nadaCheckbox) {
+    const sectionDiv = nadaCheckbox.closest('.additional-field-section');
+    if (!sectionDiv) return;
+    sectionDiv.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      if (cb === nadaCheckbox) return; // no tocar el propio "Nada que..."
+      if (cb.checked) {
+        cb.checked = false;
+        // Quitar del estado lógico
+        if (selectedAdditionalFields[section]) {
+          selectedAdditionalFields[section] = selectedAdditionalFields[section].filter(i => i !== cb.value);
+        }
+        // Si era "Otros (especificar)" o "Tareas (precisar)", ocultar textarea
+        if (cb.value === 'Otros (especificar)' || cb.value === 'Otras (especificar)') {
+          const textareaId = `otros-${section.replace(/\s+/g, '-')}`;
+          const tc = document.getElementById(`${textareaId}-container`);
+          if (tc) tc.classList.remove('show');
+        } else if (cb.value === 'Tareas (precisar)') {
+          const tc = document.getElementById('tareas-textarea-container');
+          if (tc) tc.classList.remove('show');
+        }
+      }
+      cb.disabled = true;
+      cb.closest('.additional-field-item')?.classList.add('opacity-40');
+    });
+  }
+
+  /**
+   * Recorre todas las secciones y aplica/desactiva el bloqueo de "Nada que...".
+   * Se llama tras renderizar la pantalla 4 para restaurar el estado visual.
+   */
+  function applyNadaQueLocks() {
+    const container = document.getElementById('additional-fields-container');
+    if (!container) return;
+    for (const [section, items] of Object.entries(additionalFieldsData)) {
+      const nadaItem = items.find(i => i.startsWith('Nada que'));
+      if (!nadaItem) continue;
+      const isNadaChecked = selectedAdditionalFields[section] && selectedAdditionalFields[section].includes(nadaItem);
+      const sectionDiv = container.querySelector(`.additional-field-section.${section === 'TIPO DE ACTIVIDADES Y TAREAS' ? 'section-actividades' : section === 'FORMAS DE ACCESO A LA INFORMACIÓN' ? 'section-acceso' : section === 'RECURSOS DIDÁCTICOS' ? 'section-recursos' : section === 'AGRUPAMIENTOS, DISTRIBUCIÓN DE ESPACIOS Y TIEMPOS' ? 'section-agrupamientos' : 'section-evaluacion'}`);
+      if (!sectionDiv) continue;
+      sectionDiv.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if (cb.value.startsWith('Nada que')) return;
+        if (isNadaChecked) {
+          cb.disabled = true;
+          cb.closest('.additional-field-item')?.classList.add('opacity-40');
+        } else {
+          // Rehabilitar salvo que el modo solo lectura lo impida
+          if (!cb.disabled || cb.disabled) {
+            // Si el usuario es no-admin, mantener deshabilitado
+            if (currentUser && currentUser.role !== 'admin') {
+              cb.disabled = true;
+            } else {
+              cb.disabled = false;
+            }
+          }
+          cb.closest('.additional-field-item')?.classList.remove('opacity-40');
+        }
+      });
+    }
   }
 
   /* ============================================================
