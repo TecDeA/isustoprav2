@@ -521,17 +521,15 @@
       <div class="p-6 space-y-4">
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
           <div class="flex items-center gap-2">
-            <label class="text-sm font-semibold text-slate-600" for="savedPrasYearFilter">Curso académico (solo visualización):</label>
-            <select id="savedPrasYearFilter" onchange="renderSavedPrasList()" class="px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-              <option value="">Cargando…</option>
-            </select>
+            <span class="text-sm font-semibold text-slate-600">Curso académico:</span>
+            <span id="savedPrasYearLabel" class="text-sm font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-lg">—</span>
           </div>
           <button onclick="refreshSavedPras()" class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
             <i class="fa-solid fa-rotate-right"></i> Refrescar
           </button>
         </div>
         <div id="savedPrasList" class="space-y-2">
-          <div class="text-center text-slate-400 text-sm py-6">Selecciona un curso para ver los PRAs guardados.</div>
+          <div class="text-center text-slate-400 text-sm py-6">Cargando PRAs…</div>
         </div>
       </div>
     </div>
@@ -2066,34 +2064,10 @@
     try {
       await fbDb.ref(fbPath('meta/currentAcademicYear')).set(yearId);
       activeAcademicYear = yearId;
-
-      // === Actualizar TODO lo que depende del año activo ===
-
-      // 1. Chip del header
       refreshCourseChip();
-      // 2. Campo readonly de pantalla 1
-      if (studentCourseLabel) studentCourseLabel.value = yearId;
-
-      // 3. Invalidar caches de PRAs guardados para forzar refetch
-      savedPrasCache = {};
-      // 4. Resetear el selector del modal de PRAs para que use el nuevo año
-      savedPrasLastYearSelected = null;
-
-      // 5. Recargar sugerencias de grupo/tutor para el nuevo año
-      if (currentUser) loadGroupTutorSuggestions();
-
-      // 6. Refrescar la lista de cursos del modal de gestión
       await adminListCourses();
       await refreshCourseMgmtCurrent();
-
-      // 7. Si el modal de PRAs guardados está abierto, refrescarlo
-      const savedPrasModal = document.getElementById('savedPrasModal');
-      if (savedPrasModal && !savedPrasModal.classList.contains('hidden')) {
-        console.log('[setActiveCourse] Modal de PRAs abierto: refrescando con nuevo año', yearId);
-        await loadSavedPrasYears(true);
-      }
-
-      alert(`Curso vigente cambiado a ${yearId}.\n\nLos nuevos PRAs se guardarán bajo este curso. Las sugerencias de grupos y tutores se han actualizado.`);
+      alert(`Curso vigente cambiado a ${yearId}.`);
     } catch (e) {
       console.error('Error cambiando curso vigente:', e);
       alert('Error: ' + translateFirebaseError(e));
@@ -2233,15 +2207,28 @@
   async function adminListUsers() {
     const list = document.getElementById('usersList');
     if (!requireAdmin()) return;
-    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando usuarios…</div>';
+    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando usuarios...</div>';
     try {
-      const snap = await fbDb.ref(fbPath('users')).orderByChild('createdAt').get();
+      // Intentar primero con orderByChild('createdAt'). Si falla por
+      // permisos o índice, reintentar sin ordering.
+      let snap;
+      try {
+        snap = await fbDb.ref(fbPath('users')).orderByChild('createdAt').get();
+      } catch (innerErr) {
+        console.warn('[users] orderByChild falló, reintentando sin ordering:', innerErr);
+        snap = await fbDb.ref(fbPath('users')).get();
+      }
       if (!snap || !snap.exists()) {
-        list.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">No hay usuarios.</p>';
+        list.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">No hay usuarios registrados en la base de datos.</p>';
         return;
       }
       const users = [];
-      snap.forEach(child => users.push({ uid: child.key, ...child.val() }));
+      snap.forEach(child => {
+        const val = child.val();
+        if (!val) return; // skip null entries
+        users.push({ uid: child.key, ...val });
+      });
+      console.log('[users] Usuarios encontrados en la BD:', users.length, users.map(u => ({ uid: u.uid.substring(0,8), username: u.username, role: u.role })));
       usersCache = {};
       users.forEach(u => usersCache[u.uid] = u);
       users.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -2297,89 +2284,35 @@
   /* ============================================================
    * PRAS GUARDADOS — Modal
    * ============================================================ */
-  let savedPrasLastYearSelected = null;
-
   function openSavedPrasModal() {
     document.getElementById('savedPrasModal').classList.remove('hidden');
     userMenu.classList.add('hidden-menu');
-    // Resetear la selección previa para que el selector muestre el año
-    // activo por defecto (no el último visto, que puede haber cambiado).
-    savedPrasLastYearSelected = null;
-    loadSavedPrasYears();
+    renderSavedPrasList();
   }
   function closeSavedPrasModal() {
     document.getElementById('savedPrasModal').classList.add('hidden');
   }
   async function refreshSavedPras() {
-    await loadSavedPrasYears(true);
-  }
-
-  async function loadSavedPrasYears(force) {
-    const sel = document.getElementById('savedPrasYearFilter');
-    try {
-      const snap = await fbDb.ref(fbPath('courses')).get();
-      const years = new Set();
-      if (snap && snap.exists()) {
-        snap.forEach(yearChild => {
-          const yearId = yearChild.key;
-          const yearData = yearChild.val() || {};
-          // Un año "existe" si tiene meta o si tiene PRAs
-          if (yearData.meta || (yearData.pras && Object.keys(yearData.pras).length > 0)) {
-            years.add(yearId);
-          } else {
-            // Aunque no tenga meta ni PRAs, lo añadimos por si acaso
-            // (puede ser un curso recién creado con meta vacía)
-            years.add(yearId);
-          }
-        });
-      }
-      // Añadir siempre el año activo (que es donde se guardan los PRAs nuevos)
-      const activeYear = getActiveAcademicYear();
-      years.add(activeYear);
-      console.log('[savedPras] Años disponibles:', Array.from(years).sort(), '| año activo:', activeYear);
-
-      const sorted = Array.from(years).sort().reverse();
-      // Por defecto: si no hay selección previa, mostrar el año activo
-      // (que es donde se acaban de guardar los PRAs nuevos)
-      const prevSel = savedPrasLastYearSelected || (force ? sel.value : null);
-      sel.innerHTML = sorted.map(y => `<option value="${y}">${y}</option>`).join('');
-      if (prevSel && sorted.includes(prevSel)) {
-        sel.value = prevSel;
-      } else if (sorted.includes(activeYear)) {
-        sel.value = activeYear;
-      } else if (sorted.length > 0) {
-        sel.value = sorted[0];  // el más reciente
-      }
-      savedPrasLastYearSelected = sel.value;
-      console.log('[savedPras] Año seleccionado en el selector:', sel.value);
-      await renderSavedPrasList();
-    } catch (e) {
-      console.error('Error cargando años:', e);
-      sel.innerHTML = '<option value="">—</option>';
-      document.getElementById('savedPrasList').innerHTML =
-        `<p class="text-center text-red-500 text-sm py-4">Error al cargar cursos: ${e.message}</p>`;
-    }
+    savedPrasCache = {};
+    await renderSavedPrasList();
   }
 
   async function renderSavedPrasList() {
-    const sel = document.getElementById('savedPrasYearFilter');
     const list = document.getElementById('savedPrasList');
-    const yearId = sel.value;
-    savedPrasLastYearSelected = yearId;
-    if (!yearId) {
-      list.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">Selecciona un curso.</p>';
-      return;
-    }
-    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando PRAs…</div>';
+    const yearLabel = document.getElementById('savedPrasYearLabel');
+    const yearId = getActiveAcademicYear();
+
+    if (yearLabel) yearLabel.textContent = yearId;
+
+    list.innerHTML = '<div class="text-center text-slate-400 text-sm py-6"><div class="loader mx-auto mb-2"></div>Cargando PRAs...</div>';
     try {
       const ref = fbDb.ref(fbPath(`courses/${yearId}/pras`));
       const snap = await ref.orderByChild('generatedAt').get();
-      console.log('[savedPras] Consulta PRAs para año', yearId, '| existe:', !!(snap && snap.exists()), '| path:', fbPath(`courses/${yearId}/pras`));
+      console.log('[savedPras] Consulta PRAs para año', yearId, '| existe:', !!(snap && snap.exists()));
       const pras = [];
       if (snap && snap.exists()) {
         snap.forEach(c => {
           const v = c.val();
-          console.log('[savedPras] PRA encontrado:', c.key, '| studentName:', v.studentName, '| generatedAt:', v.generatedAt);
           pras.push({ id: c.key, ...v });
         });
       }
@@ -2394,19 +2327,19 @@
 
       const canDelete = currentUser && currentUser.role === 'admin';
       list.innerHTML = pras.map(p => {
-        const dateStr = p.generatedAt ? new Date(p.generatedAt).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-        const profileLbl = ({ profileOption1: 'Pendientes', profileOption2: 'Repetición', profileOption3: 'Pend.+Repet.' })[p.profile] || '—';
+        const dateStr = p.generatedAt ? new Date(p.generatedAt).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '---';
+        const profileLbl = ({ profileOption1: 'Pendientes', profileOption2: 'Repeticion', profileOption3: 'Pend.+Repet.' })[p.profile] || '---';
         const safeName = (p.studentName || '').replace(/"/g, '&quot;');
         return `
           <div class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:shadow-sm">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <p class="font-semibold text-slate-800 truncate">${p.studentName || '—'}</p>
+                <p class="font-semibold text-slate-800 truncate">${p.studentName || '---'}</p>
                 <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">${profileLbl}</span>
               </div>
               <p class="text-xs text-slate-500 mt-0.5">
-                <i class="fa-solid fa-users mr-1"></i>${p.group || '—'} ·
-                <i class="fa-solid fa-user-tie mx-1"></i>${p.tutor || '—'} ·
+                <i class="fa-solid fa-users mr-1"></i>${p.group || '---'} .
+                <i class="fa-solid fa-user-tie mx-1"></i>${p.tutor || '---'} .
                 <i class="fa-solid fa-calendar-day mx-1"></i>${dateStr}
               </p>
             </div>
@@ -4282,7 +4215,7 @@
           const savedPrasModal = document.getElementById('savedPrasModal');
           if (savedPrasModal && !savedPrasModal.classList.contains('hidden')) {
             console.log('[savePRA] Modal de PRAs guardados abierto: refrescando lista...');
-            loadSavedPrasYears(true);
+            renderSavedPrasList();
           }
         }
 
