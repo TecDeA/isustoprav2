@@ -2725,7 +2725,10 @@
         : { tareas: '', otros: {} };
 
       // Marcar (o no) que estamos editando
-      editingPraRef = editMode ? { yearId, praId } : null;
+      // Siempre recordar qué PRA se cargó, incluso en modo visualización.
+      // Así, si el usuario pulsa "Guardar" después de visualizar, se
+      // actualiza el PRA existente en lugar de crear un duplicado.
+      editingPraRef = { yearId, praId };
 
       // Cerrar modal
       closeSavedPrasModal();
@@ -2763,7 +2766,7 @@
       if (editMode) {
         alert(`PRA de "${data.studentName || '—'}" cargado para edición.\n\nRealiza los cambios y pulsa "Guardar" o "Guardar + PDF" para actualizar el PRA existente en la nube.\n\nSi pulsas "Nuevo alumno" se cancelará la edición sin guardar.`);
       } else {
-        alert(`PRA de "${data.studentName || '—'}" cargado en modo visualización.\n\nPuedes navegar por las pantallas para revisar su contenido.\n\nSi quieres modificarlo y guardar los cambios, usa el icono del bolígrafo (editar) desde "PRAs guardados".\n\nSi pulsas "Guardar" ahora, se creará un PRA NUEVO (no se actualizará este).`);
+        alert(`PRA de "${data.studentName || '—'}" cargado para visualización.\n\nPuedes navegar por las pantallas para revisar su contenido. Si pulsas "Guardar" o "Guardar + PDF", se actualizará este mismo PRA (no se creará un duplicado).\n\nSi quieres empezar un PRA nuevo, pulsa "Nuevo alumno".`);
       }
     } catch (e) {
       console.error('Error cargando PRA:', e);
