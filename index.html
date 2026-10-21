@@ -538,6 +538,94 @@
   </div>
 
   <!-- =============================================================
+       EDIT USER SUBMODAL
+       ============================================================= -->
+  <div id="editUserModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-[55] p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-t-2xl flex justify-between items-center flex-shrink-0">
+        <h2 class="text-lg font-bold flex items-center gap-2"><i class="fa-solid fa-user-pen"></i> Editar usuario</h2>
+        <button onclick="closeEditUserModal()" class="text-white hover:text-blue-200 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="overflow-y-auto flex-1 p-6 space-y-4">
+        <input type="hidden" id="editUserUid" />
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Usuario</label>
+          <div class="relative">
+            <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="editUserUsername" type="text" autocomplete="off"
+              class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Mín. 3 caracteres. Solo minúsculas, números, ".", "_" y "-".</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Rol</label>
+          <select id="editUserRole" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white">
+            <option value="user">Usuario (solo visualización)</option>
+            <option value="admin">Administrador (control total)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Nueva contraseña</label>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="editUserPass1" type="password" autocomplete="new-password"
+              class="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              placeholder="Dejar en blanco para no cambiar" />
+            <button type="button" onclick="togglePassword('editUserPass1', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Mín. 6 caracteres. Dejar en blanco para mantener la actual.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Repetir contraseña</label>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="editUserPass2" type="password" autocomplete="new-password"
+              class="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              placeholder="Repetir nueva contraseña" />
+            <button type="button" onclick="togglePassword('editUserPass2', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+          <i class="fa-solid fa-circle-info text-amber-500 mt-0.5"></i>
+          <p>Para cambiar el usuario o la contraseña, Firebase requiere la contraseña actual del usuario. Introdúcela a continuación.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Contraseña actual del usuario *</label>
+          <div class="relative">
+            <i class="fa-solid fa-key absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="editUserCurrentPass" type="password" autocomplete="off"
+              class="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              placeholder="Contraseña actual" />
+            <button type="button" onclick="togglePassword('editUserCurrentPass', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div id="editUserError" class="hidden p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
+          <i class="fa-solid fa-circle-exclamation"></i><span></span>
+        </div>
+      </div>
+      <div class="p-4 border-t border-slate-200 flex gap-2 justify-end flex-shrink-0">
+        <button onclick="closeEditUserModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm">Cancelar</button>
+        <button onclick="adminSaveEditUser()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+          <i class="fa-solid fa-save"></i> Guardar cambios
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================================
        COURSE MANAGEMENT MODAL (admin: full CRUD; user: read-only)
        ============================================================= -->
   <div id="courseMgmtModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -2278,119 +2366,119 @@
   }
 
   /**
-   * Editar un usuario existente: permite cambiar el username y/o la
-   * contraseña. Usa el patrón "secondary app" para no cerrar la sesión
-   * del admin actual.
-   *
-   * Limitaciones del cliente Firebase:
-   *   - No se puede cambiar el email de un usuario sin iniciar sesión como
-   *     ese usuario. Como el email es <username>@tecdea.local, cambiar el
-   *     username requeriría cambiar también el email.
-   *   - Para cambiar email: hay que hacer signInWithEmailAndPassword con
-   *     la contraseña actual del usuario, luego updateEmail, luego signOut.
-   *   - Para cambiar contraseña: igual, signIn + updatePassword + signOut.
-   *
-   * Para evitar pedirle al admin la contraseña actual del usuario (que no
-   * debería conocer), pedimos la NUEVA contraseña y la usamos para
-   * iniciar sesión temporalmente + cambiar email + cambiar password.
-   * Si solo quiere cambiar el username (no la contraseña), necesitamos
-   * que introduzca la contraseña actual para poder hacer el signIn.
+   * Abre el submodal de edición de usuario con los datos actuales
+   * precargados. El admin puede cambiar username, rol y/o contraseña
+   * simultáneamente desde el formulario.
    */
-  async function adminEditUser(uid, currentUsername) {
+  function adminEditUser(uid, currentUsername) {
     if (!requireAdmin()) return;
     if (uid === currentUser.uid) {
-      alert('No puedes editarte a ti mismo desde aquí.\n\nPara cambiar tu propia contraseña, usa el cierre de sesión y la consola de Firebase, o contacta con otro administrador.');
+      alert('No puedes editarte a ti mismo desde aquí.\n\nPara cambiar tu propia contraseña, cierra sesión y pide a otro administrador que te edite, o usa la consola de Firebase.');
       return;
     }
-
-    // Obtener datos actuales del usuario desde el cache
     const u = usersCache[uid];
     if (!u) return alert('Usuario no encontrado en caché. Recarga la lista.');
+
+    // Rellenar el submodal con los datos actuales
+    document.getElementById('editUserUid').value = uid;
+    document.getElementById('editUserUsername').value = u.username || currentUsername;
+    document.getElementById('editUserRole').value = u.role || 'user';
+    document.getElementById('editUserPass1').value = '';
+    document.getElementById('editUserPass2').value = '';
+    document.getElementById('editUserCurrentPass').value = '';
+    clearAuthError(document.getElementById('editUserError'));
+
+    // Mostrar el submodal
+    document.getElementById('editUserModal').classList.remove('hidden');
+  }
+
+  function closeEditUserModal() {
+    document.getElementById('editUserModal').classList.add('hidden');
+  }
+
+  /**
+   * Lee los datos del submodal de edición, valida, y aplica los cambios
+   * usando el patrón "secondary app" para no cerrar la sesión del admin.
+   */
+  async function adminSaveEditUser() {
+    if (!requireAdmin()) return;
+    const errEl = document.getElementById('editUserError');
+    clearAuthError(errEl);
+
+    const uid = document.getElementById('editUserUid').value;
+    const newUsername = document.getElementById('editUserUsername').value.trim();
+    const newRole = document.getElementById('editUserRole').value;
+    const newPass1 = document.getElementById('editUserPass1').value;
+    const newPass2 = document.getElementById('editUserPass2').value;
+    const currentPass = document.getElementById('editUserCurrentPass').value;
+
+    if (!uid) return setAuthError(errEl, 'No se ha seleccionado ningún usuario.');
+
+    const u = usersCache[uid];
+    if (!u) return setAuthError(errEl, 'Usuario no encontrado. Recarga la lista.');
+    const currentUsername = u.username || '';
     const currentEmail = u.email || usernameToEmail(currentUsername);
 
-    // Pedir nuevos datos al admin mediante prompts
-    const newUsername = prompt(`Editar usuario\n\nUsuario actual: ${currentUsername}\n\nIntroduce el nuevo usuario (o deja igual para no cambiarlo):`, currentUsername);
-    if (newUsername === null) return; // cancelado
-
-    const newPass1 = prompt(`Editar usuario "${currentUsername}"\n\nIntroduce la nueva contraseña (o deja en blanco para no cambiarla):\n\nNota: si vas a cambiar el usuario, debes introducir la contraseña actual o una nueva, porque se necesita para reautenticar.`, '');
-    if (newPass1 === null) return; // cancelado
-
-    let newPass2 = '';
-    if (newPass1 && newPass1.length > 0) {
-      newPass2 = prompt(`Editar usuario "${currentUsername}"\n\nRepite la nueva contraseña:`, '');
-      if (newPass2 === null) return; // cancelado
-      if (newPass1 !== newPass2) return alert('Las contraseñas no coinciden.');
-      if (newPass1.length < 6) return alert('La contraseña debe tener al menos 6 caracteres.');
-    }
-
-    // Validar el nuevo username si cambió
-    const trimmedUsername = newUsername.trim();
-    const usernameChanged = trimmedUsername !== currentUsername && trimmedUsername.length > 0;
+    // Determinar qué cambió
+    const usernameChanged = newUsername !== currentUsername && newUsername.length > 0;
     const passwordChanged = newPass1 && newPass1.length > 0;
-
-    // Preguntar si se quiere cambiar el rol
-    const currentRole = u.role || 'user';
-    const newRoleInput = prompt(`Editar usuario "${currentUsername}"\n\nRol actual: ${currentRole === 'admin' ? 'Administrador' : 'Usuario'}\n\nIntroduce el nuevo rol ("admin" o "usuario"), o deja igual para no cambiarlo:`, currentRole);
-    if (newRoleInput === null) return; // cancelado
-    const newRole = newRoleInput.trim().toLowerCase();
-    const roleChanged = (newRole === 'admin' || newRole === 'user') && newRole !== currentRole;
+    const roleChanged = newRole !== (u.role || 'user');
 
     if (!usernameChanged && !passwordChanged && !roleChanged) {
-      alert('No se han realizado cambios.');
-      return;
+      return setAuthError(errEl, 'No se han realizado cambios.');
     }
 
-    if (newRole !== 'admin' && newRole !== 'user') {
-      return alert('Rol no válido. Debe ser "admin" o "usuario".');
-    }
-
+    // Validaciones
     if (usernameChanged) {
-      if (trimmedUsername.length < 3) return alert('El usuario debe tener al menos 3 caracteres.');
-      if (!/^[a-z0-9._-]+$/.test(trimmedUsername)) return alert('Solo minúsculas, números, ".", "_" y "-".');
+      if (newUsername.length < 3) return setAuthError(errEl, 'El usuario debe tener al menos 3 caracteres.');
+      if (!/^[a-z0-9._-]+$/.test(newUsername)) return setAuthError(errEl, 'Solo minúsculas, números, ".", "_" y "-".');
+    }
+    if (passwordChanged) {
+      if (newPass1.length < 6) return setAuthError(errEl, 'La contraseña debe tener al menos 6 caracteres.');
+      if (newPass1 !== newPass2) return setAuthError(errEl, 'Las contraseñas no coinciden.');
     }
 
-    // Si se cambia el username, necesitamos la contraseña para reautenticar
-    // (porque hay que cambiar el email en Firebase Auth).
-    // Si solo se cambia la contraseña, también necesitamos la contraseña
-    // actual para hacer signIn.
-    // En ambos casos, pedimos al admin que introduzca la contraseña.
-    const passwordToUse = passwordChanged ? newPass1 : newPass1;
-    if (!passwordToUse) {
-      // Si no hay contraseña nueva y no se introdujo la actual, no podemos
-      // hacer nada (Firebase Auth requiere reautenticación para cambios).
-      alert('Para editar un usuario necesitas introducir una contraseña (la actual o una nueva).\n\nFirebase Auth requiere reautenticación para cambiar email o contraseña.');
-      return;
+    // Si se cambia username o contraseña, necesitamos la contraseña actual
+    // para reautenticar en Firebase Auth.
+    if ((usernameChanged || passwordChanged) && !currentPass) {
+      return setAuthError(errEl, 'Para cambiar el usuario o la contraseña, debes introducir la contraseña actual del usuario.');
     }
 
-    // Usar secondary app para no cerrar la sesión del admin
+    // Aplicar cambios
     let secondaryApp = null;
     try {
-      secondaryApp = firebase.initializeApp(firebaseConfig, 'isustopra-edit-' + Date.now());
-      const secondaryAuth = secondaryApp.auth();
-
-      // 1. Iniciar sesión como el usuario a editar
-      await secondaryAuth.signInWithEmailAndPassword(currentEmail, passwordToUse);
-      const editUser = secondaryAuth.currentUser;
-
-      // 2. Preparar actualizaciones de metadata en la BD
       const dbUpdates = {
         updatedAt: firebase.database.ServerValue.TIMESTAMP,
         updatedBy: currentUser.uid
       };
-      if (usernameChanged) {
-        const newEmail = usernameToEmail(trimmedUsername);
-        // Cambiar el email en Firebase Auth
-        await editUser.updateEmail(newEmail);
-        dbUpdates.username = trimmedUsername;
-        dbUpdates.email = newEmail;
+
+      // Si se cambia username o contraseña, usar secondary app para
+      // reautenticar.
+      if (usernameChanged || passwordChanged) {
+        secondaryApp = firebase.initializeApp(firebaseConfig, 'isustopra-edit-' + Date.now());
+        const secondaryAuth = secondaryApp.auth();
+
+        // 1. Iniciar sesión como el usuario a editar
+        await secondaryAuth.signInWithEmailAndPassword(currentEmail, currentPass);
+        const editUser = secondaryAuth.currentUser;
+
+        // 2. Cambiar email si cambió el username
+        if (usernameChanged) {
+          const newEmail = usernameToEmail(newUsername);
+          await editUser.updateEmail(newEmail);
+          dbUpdates.username = newUsername;
+          dbUpdates.email = newEmail;
+        }
+
+        // 3. Cambiar contraseña si procede
+        if (passwordChanged) {
+          await editUser.updatePassword(newPass1);
+        }
+
+        await secondaryAuth.signOut();
       }
 
-      // 3. Si hay contraseña nueva, actualizarla
-      if (passwordChanged) {
-        await editUser.updatePassword(newPass1);
-      }
-
-      // 4. Si cambió el rol, actualizarlo en la BD
+      // 4. Cambiar rol si procede (solo en la BD, no requiere Auth)
       if (roleChanged) {
         dbUpdates.role = newRole;
       }
@@ -2398,19 +2486,24 @@
       // 5. Aplicar todas las actualizaciones de metadata en la BD
       await fbDb.ref(fbPath(`users/${uid}`)).update(dbUpdates);
 
-      await secondaryAuth.signOut();
-
-      alert(`Usuario "${currentUsername}" actualizado correctamente.${usernameChanged ? `\n\nNuevo usuario: ${trimmedUsername}` : ''}${passwordChanged ? '\n\nContraseña actualizada.' : ''}${roleChanged ? `\n\nNuevo rol: ${newRole === 'admin' ? 'Administrador' : 'Usuario'}` : ''}`);
+      // Limpiar y cerrar
+      closeEditUserModal();
       await adminListUsers();
+
+      const changes = [];
+      if (usernameChanged) changes.push(`Nuevo usuario: ${newUsername}`);
+      if (passwordChanged) changes.push('Contraseña actualizada');
+      if (roleChanged) changes.push(`Nuevo rol: ${newRole === 'admin' ? 'Administrador' : 'Usuario'}`);
+      alert(`Usuario "${currentUsername}" actualizado correctamente.\n\n${changes.join('\n')}`);
     } catch (e) {
       console.error('Error editando usuario:', e);
       const code = e.code || '';
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-        alert('La contraseña introducida no coincide con la del usuario. No se pueden hacer cambios sin la contraseña correcta.');
+        setAuthError(errEl, 'La contraseña actual introducida no coincide con la del usuario.');
       } else if (code === 'auth/requires-recent-login') {
-        alert('Firebase requiere un login reciente para este cambio. Inténtalo de nuevo.');
+        setAuthError(errEl, 'Firebase requiere un login reciente. Inténtalo de nuevo.');
       } else {
-        alert('Error al editar usuario: ' + translateFirebaseError(e));
+        setAuthError(errEl, translateFirebaseError(e));
       }
     } finally {
       if (secondaryApp) {
